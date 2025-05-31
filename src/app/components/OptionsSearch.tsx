@@ -5,9 +5,10 @@ import { PutOption } from '../types';
 
 interface OptionsSearchProps {
   onSelectOption: (option: PutOption) => void;
+  onOptionsLoaded?: (options: PutOption[], symbol: string, underlyingPrice: number) => void;
 }
 
-export function OptionsSearch({ onSelectOption }: OptionsSearchProps) {
+export function OptionsSearch({ onSelectOption, onOptionsLoaded }: OptionsSearchProps) {
   const [symbol, setSymbol] = useState('SPY');
   const [options, setOptions] = useState<PutOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -20,21 +21,23 @@ export function OptionsSearch({ onSelectOption }: OptionsSearchProps) {
     
     setLoading(true);
     try {
-      // Call our API route that will search for options data
       const response = await fetch(`/api/options?symbol=${searchSymbol.toUpperCase()}`);
       const data = await response.json();
       
       if (data.success) {
         setOptions(data.puts || []);
         setUnderlyingPrice(data.underlyingPrice);
+        
+        // Notify parent component of loaded options
+        if (onOptionsLoaded) {
+          onOptionsLoaded(data.puts || [], searchSymbol.toUpperCase(), data.underlyingPrice);
+        }
       } else {
         console.error('Failed to fetch options:', data.error);
-        // Fallback to simulated data for demo
         generateSimulatedOptions(searchSymbol);
       }
     } catch (error) {
       console.error('Error fetching options:', error);
-      // Fallback to simulated data for demo
       generateSimulatedOptions(searchSymbol);
     }
     setLoading(false);
@@ -82,7 +85,13 @@ export function OptionsSearch({ onSelectOption }: OptionsSearchProps) {
       }
     });
     
-    setOptions(simulatedOptions.sort((a, b) => a.strike - b.strike));
+    const sortedOptions = simulatedOptions.sort((a, b) => a.strike - b.strike);
+    setOptions(sortedOptions);
+    
+    // Notify parent component of loaded options
+    if (onOptionsLoaded) {
+      onOptionsLoaded(sortedOptions, searchSymbol.toUpperCase(), basePrice);
+    }
   };
 
   const getBasePrice = (sym: string): number => {

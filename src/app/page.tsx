@@ -4,12 +4,16 @@ import { useState, useEffect, useCallback } from 'react';
 import { OptionsSearch } from './components/OptionsSearch';
 import { Portfolio } from './components/Portfolio';
 import { TradeModal } from './components/TradeModal';
+import { AIAnalysis } from './components/AIAnalysis';
 import { PutOption, Trade } from './types';
 
 export default function Home() {
   const [selectedOption, setSelectedOption] = useState<PutOption | null>(null);
   const [showTradeModal, setShowTradeModal] = useState(false);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [currentOptions, setCurrentOptions] = useState<PutOption[]>([]);
+  const [currentSymbol, setCurrentSymbol] = useState<string>('SPY');
+  const [currentPrice, setCurrentPrice] = useState<number>(580);
   const [portfolio, setPortfolio] = useState({
     cash: 10000, // Starting with $10k paper money
     totalValue: 10000,
@@ -65,6 +69,14 @@ export default function Home() {
     setShowTradeModal(false);
   };
 
+  const handleOptionsLoaded = (options: PutOption[], symbol: string, underlyingPrice: number) => {
+    setCurrentOptions(options);
+    setCurrentSymbol(symbol);
+    setCurrentPrice(underlyingPrice);
+  };
+
+  const activeTrades = trades.filter(trade => trade.status === 'active');
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <header className="bg-white dark:bg-gray-800 shadow-sm border-b">
@@ -75,7 +87,7 @@ export default function Home() {
                 Options Paper Trader
               </h1>
               <p className="text-gray-600 dark:text-gray-300">
-                Practice selling puts and collecting premiums
+                Practice selling puts and collecting premiums with AI analysis
               </p>
             </div>
             <div className="text-right">
@@ -94,7 +106,7 @@ export default function Home() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Options Search Section */}
           <div className="space-y-6">
             <OptionsSearch 
@@ -102,6 +114,7 @@ export default function Home() {
                 setSelectedOption(option);
                 setShowTradeModal(true);
               }}
+              onOptionsLoaded={handleOptionsLoaded}
             />
           </div>
 
@@ -114,6 +127,21 @@ export default function Home() {
                   : trade
               ));
             }} />
+          </div>
+
+          {/* AI Analysis Section */}
+          <div className="space-y-6">
+            <AIAnalysis 
+              options={currentOptions}
+              selectedOption={selectedOption}
+              symbol={currentSymbol}
+              underlyingPrice={currentPrice}
+              portfolio={{
+                cash: portfolio.cash,
+                activePositions: activeTrades.length,
+                unrealizedPnL: portfolio.unrealizedPnL
+              }}
+            />
           </div>
         </div>
       </main>
