@@ -15,12 +15,11 @@ export default function Home() {
   const [currentSymbol, setCurrentSymbol] = useState<string>('SPY');
   const [currentPrice, setCurrentPrice] = useState<number>(580);
   const [portfolio, setPortfolio] = useState({
-    cash: 10000, // Starting with $10k paper money
+    cash: 10000,
     totalValue: 10000,
     unrealizedPnL: 0
   });
 
-  // Memoize the calculatePortfolioValue function
   const calculatePortfolioValue = useCallback(() => {
     const activeTrades = trades.filter(trade => trade.status === 'active');
     const premiumCollected = activeTrades.reduce((sum, trade) => sum + trade.premiumReceived, 0);
@@ -32,7 +31,6 @@ export default function Home() {
     }));
   }, [trades]);
 
-  // Load trades from localStorage on mount
   useEffect(() => {
     const savedTrades = localStorage.getItem('paper-trades');
     if (savedTrades) {
@@ -40,14 +38,13 @@ export default function Home() {
     }
   }, []);
 
-  // Save trades to localStorage whenever trades change
   useEffect(() => {
     localStorage.setItem('paper-trades', JSON.stringify(trades));
     calculatePortfolioValue();
   }, [trades, calculatePortfolioValue]);
 
   const handleSellPut = (option: PutOption, contracts: number) => {
-    const premium = option.bid * contracts * 100; // Options are per 100 shares
+    const premium = option.bid * contracts * 100;
     const newTrade: Trade = {
       id: Date.now().toString(),
       symbol: option.symbol,
@@ -78,37 +75,51 @@ export default function Home() {
   const activeTrades = trades.filter(trade => trade.status === 'active');
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+      {/* Header */}
+      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-b border-gray-200 dark:border-gray-800 sticky top-0 z-40">
+        <div className="max-w-[1600px] mx-auto px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-300 dark:to-white bg-clip-text text-transparent">
                 Options Paper Trader
               </h1>
-              <p className="text-gray-600 dark:text-gray-300">
-                Practice selling puts and collecting premiums with AI analysis
+              <p className="text-gray-600 dark:text-gray-400 text-sm font-medium">
+                Practice selling puts • Collect premiums • AI-powered analysis
               </p>
             </div>
-            <div className="text-right">
-              <div className="text-2xl font-bold text-green-600">
-                ${portfolio.totalValue.toLocaleString()}
+            
+            {/* Portfolio Stats - Horizontal Layout */}
+            <div className="flex items-center gap-8">
+              <div className="text-center">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-medium">Total Value</div>
+                <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                  ${portfolio.totalValue.toLocaleString()}
+                </div>
               </div>
-              <div className="text-sm text-gray-500">
-                Cash: ${portfolio.cash.toLocaleString()}
+              <div className="text-center">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-medium">Cash</div>
+                <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  ${portfolio.cash.toLocaleString()}
+                </div>
               </div>
-              <div className={`text-sm ${portfolio.unrealizedPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                P&L: ${portfolio.unrealizedPnL.toLocaleString()}
+              <div className="text-center">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-medium">P&L</div>
+                <div className={`text-lg font-semibold ${portfolio.unrealizedPnL >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  ${portfolio.unrealizedPnL.toLocaleString()}
+                </div>
               </div>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Options Search Section */}
-          <div className="space-y-6">
+      {/* Main Content */}
+      <main className="max-w-[1600px] mx-auto px-6 lg:px-8 py-6">
+        {/* Top Row - Options Chain and AI Analysis */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
+          {/* Options Chain - Takes 3/4 width */}
+          <div className="lg:col-span-3">
             <OptionsSearch 
               onSelectOption={(option) => {
                 setSelectedOption(option);
@@ -117,32 +128,34 @@ export default function Home() {
               onOptionsLoaded={handleOptionsLoaded}
             />
           </div>
-
-          {/* Portfolio Section */}
-          <div className="space-y-6">
-            <Portfolio trades={trades} onCloseTrade={(tradeId) => {
-              setTrades(prev => prev.map(trade => 
-                trade.id === tradeId 
-                  ? { ...trade, status: 'closed' as const, closeDate: new Date().toISOString() }
-                  : trade
-              ));
-            }} />
+          
+          {/* AI Analysis Sidebar - Takes 1/4 width, full height */}
+          <div className="lg:col-span-1">
+            <div className="h-[600px]">
+              <AIAnalysis 
+                options={currentOptions}
+                selectedOption={selectedOption}
+                symbol={currentSymbol}
+                underlyingPrice={currentPrice}
+                portfolio={{
+                  cash: portfolio.cash,
+                  activePositions: activeTrades.length,
+                  unrealizedPnL: portfolio.unrealizedPnL
+                }}
+              />
+            </div>
           </div>
+        </div>
 
-          {/* AI Analysis Section */}
-          <div className="space-y-6">
-            <AIAnalysis 
-              options={currentOptions}
-              selectedOption={selectedOption}
-              symbol={currentSymbol}
-              underlyingPrice={currentPrice}
-              portfolio={{
-                cash: portfolio.cash,
-                activePositions: activeTrades.length,
-                unrealizedPnL: portfolio.unrealizedPnL
-              }}
-            />
-          </div>
+        {/* Bottom Row - Portfolio (Full Width) */}
+        <div>
+          <Portfolio trades={trades} onCloseTrade={(tradeId) => {
+            setTrades(prev => prev.map(trade => 
+              trade.id === tradeId 
+                ? { ...trade, status: 'closed' as const, closeDate: new Date().toISOString() }
+                : trade
+            ));
+          }} />
         </div>
       </main>
 

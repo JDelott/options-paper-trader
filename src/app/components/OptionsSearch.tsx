@@ -28,7 +28,6 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded }: OptionsSearch
         setOptions(data.puts || []);
         setUnderlyingPrice(data.underlyingPrice);
         
-        // Notify parent component of loaded options
         if (onOptionsLoaded) {
           onOptionsLoaded(data.puts || [], searchSymbol.toUpperCase(), data.underlyingPrice);
         }
@@ -43,15 +42,14 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded }: OptionsSearch
     setLoading(false);
   };
 
-  // Generate simulated options data for demo purposes
   const generateSimulatedOptions = (searchSymbol: string) => {
     const basePrice = getBasePrice(searchSymbol);
     setUnderlyingPrice(basePrice);
     
     const expirations = [
-      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 1 week
-      new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 2 weeks
-      new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 1 month
+      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     ];
     
     const simulatedOptions: PutOption[] = [];
@@ -62,7 +60,6 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded }: OptionsSearch
         const timeToExpiry = (new Date(expiration).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
         const moneyness = strike / basePrice;
         
-        // Simple pricing model for demo
         const intrinsicValue = Math.max(0, strike - basePrice);
         const timeValue = Math.max(0.01, 0.1 * Math.sqrt(timeToExpiry / 365) * basePrice * 0.2);
         const bid = Math.max(0.01, intrinsicValue + timeValue * 0.9);
@@ -88,7 +85,6 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded }: OptionsSearch
     const sortedOptions = simulatedOptions.sort((a, b) => a.strike - b.strike);
     setOptions(sortedOptions);
     
-    // Notify parent component of loaded options
     if (onOptionsLoaded) {
       onOptionsLoaded(sortedOptions, searchSymbol.toUpperCase(), basePrice);
     }
@@ -96,14 +92,8 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded }: OptionsSearch
 
   const getBasePrice = (sym: string): number => {
     const prices: { [key: string]: number } = {
-      'SPY': 580,
-      'QQQ': 525,
-      'AAPL': 245,
-      'MSFT': 450,
-      'TSLA': 350,
-      'NVDA': 900,
-      'AMZN': 190,
-      'GOOGL': 175
+      'SPY': 580, 'QQQ': 525, 'AAPL': 245, 'MSFT': 450,
+      'TSLA': 350, 'NVDA': 900, 'AMZN': 190, 'GOOGL': 175
     };
     return prices[sym] || 100;
   };
@@ -121,118 +111,110 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded }: OptionsSearch
     return 'ATM';
   };
 
+  const getMoneynessStyle = (moneyness: string) => {
+    switch (moneyness) {
+      case 'ITM': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300';
+      case 'ATM': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+      case 'OTM': return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+    }
+  };
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-      <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
-        Options Search
-      </h2>
-      
-      {/* Symbol Input */}
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Stock Symbol
-        </label>
+    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 h-full">
+      {/* Compact Header with Controls */}
+      <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Options Chain</h2>
+            {underlyingPrice && (
+              <div className="text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
+                {symbol} • {formatCurrency(underlyingPrice)}
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Compact Symbol Search */}
         <div className="flex gap-2">
           <input
             type="text"
             value={symbol}
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            placeholder="Enter symbol (e.g., SPY)"
+            className="w-24 px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-medium text-gray-900 dark:text-white"
+            placeholder="Symbol"
           />
           <button
             onClick={() => searchOptions(symbol)}
             disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
           >
             {loading ? 'Loading...' : 'Search'}
           </button>
-        </div>
-        
-        {/* Popular symbols */}
-        <div className="mt-2 flex flex-wrap gap-2">
-          {popularSymbols.map(sym => (
-            <button
-              key={sym}
-              onClick={() => {
-                setSymbol(sym);
-                searchOptions(sym);
-              }}
-              className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
-            >
-              {sym}
-            </button>
-          ))}
+          
+          {/* Popular Symbols - Inline */}
+          <div className="flex gap-1 ml-2">
+            {popularSymbols.slice(0, 6).map(sym => (
+              <button
+                key={sym}
+                onClick={() => {
+                  setSymbol(sym);
+                  searchOptions(sym);
+                }}
+                className="px-2 py-1 text-xs font-medium bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                {sym}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Underlying Price */}
-      {underlyingPrice && (
-        <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-          <div className="text-sm text-gray-600 dark:text-gray-400">Current Price</div>
-          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-            {formatCurrency(underlyingPrice)}
-          </div>
-        </div>
-      )}
-
-      {/* Options Chain */}
+      {/* Compact Options Table */}
       {options.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead className="bg-gray-50 dark:bg-gray-700">
+        <div className="overflow-auto max-h-[500px]">
+          <table className="min-w-full">
+            <thead className="bg-gray-50 dark:bg-gray-800/50 sticky top-0">
               <tr>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Strike
-                </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Expiry
-                </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Bid
-                </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  IV
-                </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Action
-                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Strike</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Expiry</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Premium</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">IV</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Delta</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Action</th>
               </tr>
             </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {options.slice(0, 20).map((option, index) => (
-                <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                  <td className="px-3 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+            <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
+              {options.map((option, index) => (
+                <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-900 dark:text-white">
                         {formatCurrency(option.strike)}
                       </span>
-                      <span className={`ml-2 px-2 py-1 text-xs rounded ${
-                        getMoneyness(option.strike, option.underlyingPrice) === 'ITM' 
-                          ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
-                          : getMoneyness(option.strike, option.underlyingPrice) === 'ATM'
-                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
-                          : 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
-                      }`}>
+                      <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${getMoneynessStyle(getMoneyness(option.strike, option.underlyingPrice))}`}>
                         {getMoneyness(option.strike, option.underlyingPrice)}
                       </span>
                     </div>
                   </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                    {new Date(option.expiration).toLocaleDateString()}
+                  <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
+                    {new Date(option.expiration).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-green-600">
+                  <td className="px-3 py-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                     {formatCurrency(option.bid)}
                   </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                  <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
                     {formatPercent(option.impliedVolatility)}
                   </td>
-                  <td className="px-3 py-4 whitespace-nowrap">
+                  <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
+                    {option.delta.toFixed(2)}
+                  </td>
+                  <td className="px-3 py-2">
                     <button
                       onClick={() => onSelectOption(option)}
-                      className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+                      className="px-3 py-1 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-gray-900 text-xs font-medium rounded transition-colors"
                     >
-                      Sell Put
+                      Sell
                     </button>
                   </td>
                 </tr>
