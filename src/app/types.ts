@@ -136,3 +136,51 @@ export interface PerformanceMetrics {
   sharpeRatio: number;
   maxDrawdown: number;
 }
+
+export interface OptionsAnalysisResult {
+  option: PutOption;
+  annualizedReturn: number;
+  daysToExpiration: number;
+  premium: number;
+  breakeven: number;
+  isGoodTrade: boolean;
+  meetsDeltalFilter: boolean;
+}
+
+export interface AnalysisFilters {
+  minAnnualizedReturn: number;
+  deltaRange: {
+    min: number;
+    max: number;
+  };
+  enableDeltaFilter: boolean;
+  minDaysToExpiration: number;
+  maxDaysToExpiration: number;
+  minPremium: number;
+  maxPremium: number;
+}
+
+export interface ComparisonMetrics {
+  result: OptionsAnalysisResult;
+  probabilityOfProfit: number;
+  expectedReturn: number;
+  riskAdjustedReturn: number;
+  capitalEfficiency: number;
+  timeDecay: number;
+  volatilityRisk: number;
+  liquidityScore: number;
+  overallScore: number;
+  rank: number;
+}
+
+export interface ScenarioResult {
+  name: string;
+  priceChange: number;
+  probability: number;
+  finalPrice: number;
+  results: Array<{
+    strike: number;
+    pnl: number;
+    roi: number;
+  }>;
+}

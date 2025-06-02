@@ -6,11 +6,12 @@ import { TradeModal } from './components/TradeModal';
 import { AIAnalysis } from './components/AIAnalysis';
 import { ScenarioAnalysis } from './components/ScenarioAnalysis';
 import { PutOption, Trade } from './types';
-import { OptionsScanner } from './components/OptionsScanner';
 import { IVRankChart } from './components/IVRankChart';
 import { RiskProfiler } from './components/RiskProfiler';
-import { OpportunitiesDashboard } from './components/OpportunitiesDashboard';
 import dynamic from 'next/dynamic';
+import { OptionsAnalysis } from './components/OptionsAnalysis';
+import { OptionsAnalysisResult } from './types';
+import { AdvancedOptionsComparison } from './components/AdvancedOptionsComparison';
 
 const OptionsSearch = dynamic(() => import('./components/OptionsSearch').then(mod => ({ default: mod.OptionsSearch })), {
   ssr: false,
@@ -59,6 +60,9 @@ export default function Home() {
     unrealizedPnL: 0
   });
 
+  // Update state to handle multiple selected options
+  const [selectedOptions, setSelectedOptions] = useState<OptionsAnalysisResult[]>([]);
+
   // Function to fetch real-time stock price
   const fetchStockPrice = useCallback(async (symbol: string): Promise<number> => {
     try {
@@ -88,23 +92,29 @@ export default function Home() {
   const handleSymbolSearch = useCallback(async (symbol: string) => {
     if (!symbol.trim()) return;
     
+    const cleanSymbol = symbol.trim().toUpperCase();
     setSearchLoading(true);
     setSearchError('');
     
+    console.log(`🔍 Searching for symbol: ${cleanSymbol}`);
+    
     try {
-      const price = await fetchStockPrice(symbol);
+      const price = await fetchStockPrice(cleanSymbol);
+      
+      console.log(`✅ Found ${cleanSymbol} with price: $${price}`);
       
       if (price > 0) {
-        setCurrentSymbol(symbol.toUpperCase());
+        setCurrentSymbol(cleanSymbol);
         setCurrentPrice(price);
         setCurrentStep(2);
         setSearchSymbol('');
+        console.log(`🎯 Proceeding to options for ${cleanSymbol} at $${price}`);
       } else {
-        setSearchError('Invalid symbol or no price data available');
+        setSearchError(`Symbol "${cleanSymbol}" found but no valid price data available`);
       }
     } catch (error) {
-      setSearchError('Symbol not found or invalid');
-      console.error('Search error:', error);
+      console.error(`❌ Search failed for ${cleanSymbol}:`, error);
+      setSearchError(`Symbol "${cleanSymbol}" not found or has no options data available`);
     } finally {
       setSearchLoading(false);
     }
@@ -211,6 +221,50 @@ export default function Home() {
     setCurrentOptions(options);
     setCurrentSymbol(symbol);
     setCurrentPrice(underlyingPrice);
+  };
+
+  const handleSelectOption = (result: OptionsAnalysisResult) => {
+    setSelectedOption(result.option);
+    setCurrentStep(3);
+  };
+
+  // Keep the single option handler for the old workflow
+  const handleSelectPutOption = (option: PutOption) => {
+    setSelectedOption(option);
+    setCurrentStep(3);
+  };
+
+  // Add handler for multiple option selection (for comparison)
+  const handleSelectOptionForComparison = (result: OptionsAnalysisResult) => {
+    setSelectedOptions(prev => {
+      const exists = prev.find(opt => 
+        opt.option.symbol === result.option.symbol && 
+        opt.option.strike === result.option.strike &&
+        opt.option.expiration === result.option.expiration
+      );
+      
+      if (!exists && prev.length < 3) {
+        return [...prev, result];
+      }
+      return prev;
+    });
+  };
+
+  // Add handler to proceed to comparison
+  const handleProceedToComparison = () => {
+    if (selectedOptions.length > 0) {
+      setCurrentStep(3);
+    }
+  };
+
+  // Add handler to remove option from comparison
+  const handleRemoveFromComparison = (index: number) => {
+    setSelectedOptions(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Add handler to clear all selected options
+  const handleClearAllSelected = () => {
+    setSelectedOptions([]);
   };
 
   return (
@@ -322,7 +376,7 @@ export default function Home() {
             </div>
 
             <div className="max-w-7xl mx-auto px-6 py-8">
-              {/* Step 1: Symbol Selection with Real-Time Data */}
+              {/* Step 1: Symbol Selection with Enhanced Search */}
               {currentStep === 1 && (
                 <div className="max-w-4xl mx-auto text-center space-y-8">
                   <div>
@@ -330,91 +384,151 @@ export default function Home() {
                       Choose Your Symbol
                     </h1>
                     <p className="text-xl text-gray-600 dark:text-gray-400">
-                      Select a stock or ETF to explore put selling opportunities
+                      Search any stock or ETF, or select from popular options below
                     </p>
                   </div>
                   
-                  {/* Real-Time Default Stocks */}
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                    {defaultStocks.map(stock => (
-                      <button
-                        key={stock.symbol}
-                        onClick={() => handleStockSelection(stock)}
-                        disabled={stock.loading}
-                        className={`p-6 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-emerald-500 transition-all text-center group ${
-                          stock.loading ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-lg'
-                        }`}
-                      >
-                        <div className="text-2xl font-bold text-gray-900 dark:text-white group-hover:text-emerald-600">
-                          {stock.symbol}
+                  {/* ENHANCED SEARCH - Make it more prominent */}
+                  <div className="p-8 bg-gradient-to-r from-emerald-50 to-blue-50 dark:from-emerald-900/20 dark:to-blue-900/20 border-2 border-dashed border-emerald-300 dark:border-emerald-700 rounded-xl">
+                    <div className="space-y-6">
+                      <div>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                          🔍 Search Any Symbol
+                        </h2>
+                        <p className="text-gray-600 dark:text-gray-400">
+                          Enter any stock symbol to get real-time options data from Tradier
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center justify-center space-x-4 max-w-md mx-auto">
+                        <div className="flex-1">
+                          <input
+                            type="text"
+                            placeholder="AMZN, GOOGL, META..."
+                            value={searchSymbol}
+                            onChange={(e) => {
+                              setSearchSymbol(e.target.value.toUpperCase());
+                              setSearchError('');
+                            }}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter' && searchSymbol.trim()) {
+                                handleSymbolSearch(searchSymbol);
+                              }
+                            }}
+                            className="w-full px-6 py-4 text-xl font-bold text-center border-2 border-emerald-300 dark:border-emerald-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-xl focus:outline-none focus:ring-4 focus:ring-emerald-200 dark:focus:ring-emerald-800 focus:border-emerald-500"
+                            disabled={searchLoading}
+                            autoFocus
+                          />
                         </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                          {stock.name}
-                        </div>
-                        <div className="mt-2">
-                          {stock.loading ? (
-                            <div className="flex items-center justify-center">
-                              <div className="animate-spin w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full"></div>
-                            </div>
-                          ) : stock.error ? (
-                            <div className="text-xs text-red-500">Error loading</div>
-                          ) : (
-                            <div className="text-lg font-semibold text-emerald-600">
-                              ${stock.price.toFixed(2)}
-                            </div>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Enhanced Search Section */}
-                  <div className="mt-8 p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-center space-x-4">
-                        <input
-                          type="text"
-                          placeholder="Enter any symbol (e.g., AMZN, GOOGL)..."
-                          value={searchSymbol}
-                          onChange={(e) => {
-                            setSearchSymbol(e.target.value.toUpperCase());
-                            setSearchError(''); // Clear error when typing
-                          }}
-                          onKeyPress={(e) => {
-                            if (e.key === 'Enter') {
-                              handleSymbolSearch(searchSymbol);
-                            }
-                          }}
-                          className="px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white w-64 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          disabled={searchLoading}
-                        />
                         <button 
                           onClick={() => handleSymbolSearch(searchSymbol)}
                           disabled={searchLoading || !searchSymbol.trim()}
-                          className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                          className="px-8 py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold text-xl rounded-xl transition-all transform hover:scale-105 disabled:hover:scale-100 shadow-lg"
                         >
                           {searchLoading ? (
                             <div className="flex items-center space-x-2">
-                              <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                              <div className="animate-spin w-5 h-5 border-3 border-white border-t-transparent rounded-full"></div>
                               <span>Searching...</span>
                             </div>
                           ) : (
-                            'Search'
+                            <div className="flex items-center space-x-2">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                              </svg>
+                              <span>Search</span>
+                            </div>
                           )}
                         </button>
                       </div>
                       
-                      {/* Search Error Message */}
-                      {searchError && (
-                        <div className="text-red-500 text-sm text-center">
-                          {searchError}
+                      {/* Search Results/Status */}
+                      {searchLoading && (
+                        <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                          <div className="flex items-center justify-center space-x-2 text-blue-600 dark:text-blue-400">
+                            <div className="animate-spin w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                            <span>Searching Tradier API for &quot;{searchSymbol}&quot;...</span>
+                          </div>  
                         </div>
                       )}
                       
-                      {/* Popular symbols suggestion */}
-                      <div className="text-center text-sm text-gray-500 dark:text-gray-400">
-                        <p>Popular symbols: AMD, AMZN, GOOGL, META, NFLX, CRM, DIS, BA, JPM, GE</p>
+                      {searchError && (
+                        <div className="text-center p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                          <div className="text-red-600 dark:text-red-400 font-medium">
+                            ❌ {searchError}
+                          </div>
+                          <div className="text-sm text-red-500 dark:text-red-400 mt-1">
+                            Make sure the symbol is valid and has options available
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Popular search examples */}
+                      <div className="text-center">
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                          Popular searches:
+                        </p>
+                        <div className="flex flex-wrap justify-center gap-2">
+                          {['AMZN', 'GOOGL', 'META', 'AMD', 'NFLX', 'CRM', 'DIS', 'BA'].map(sym => (
+                            <button
+                              key={sym}
+                              onClick={() => {
+                                setSearchSymbol(sym);
+                                handleSymbolSearch(sym);
+                              }}
+                              className="px-3 py-1 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-emerald-100 dark:hover:bg-emerald-800 text-gray-700 dark:text-gray-300 hover:text-emerald-700 dark:hover:text-emerald-300 rounded-full transition-colors"
+                              disabled={searchLoading}
+                            >
+                              {sym}
+                            </button>
+                          ))}
+                        </div>
                       </div>
+                    </div>
+                  </div>
+                  
+                  {/* Divider */}
+                  <div className="flex items-center space-x-4">
+                    <div className="flex-1 h-px bg-gray-300 dark:bg-gray-600"></div>
+                    <span className="text-gray-500 dark:text-gray-400 font-medium">OR</span>
+                    <div className="flex-1 h-px bg-gray-300 dark:bg-gray-600"></div>
+                  </div>
+                  
+                  {/* Real-Time Default Stocks */}
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                      Popular Stocks & ETFs
+                    </h2>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                      {defaultStocks.map(stock => (
+                        <button
+                          key={stock.symbol}
+                          onClick={() => handleStockSelection(stock)}
+                          disabled={stock.loading}
+                          className={`p-6 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-emerald-500 transition-all text-center group rounded-lg ${
+                            stock.loading ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-lg hover:scale-105'
+                          }`}
+                        >
+                          <div className="text-2xl font-bold text-gray-900 dark:text-white group-hover:text-emerald-600">
+                            {stock.symbol}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            {stock.name}
+                          </div>
+                          <div className="mt-2">
+                            {stock.loading ? (
+                              <div className="flex items-center justify-center">
+                                <div className="animate-spin w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full"></div>
+                              </div>
+                            ) : stock.error ? (
+                              <div className="text-xs text-red-500">Error loading</div>
+                            ) : (
+                              <div className="text-lg font-semibold text-emerald-600">
+                                ${stock.price.toFixed(2)}
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -426,152 +540,271 @@ export default function Home() {
                   <div className="flex items-center justify-between">
                     <div>
                       <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                        {currentSymbol} Options Chain
+                        Browse & Select Options
                       </h1>
                       <p className="text-lg text-gray-600 dark:text-gray-400 mt-2">
-                        Current Price: <span className="font-semibold text-emerald-600">${currentPrice}</span> • 
-                        Choose puts to sell for premium collection
+                        {currentSymbol.toUpperCase()} • Current Price: ${currentPrice}
                       </p>
                     </div>
-                    <button
-                      onClick={() => setCurrentStep(1)}
-                      className="px-4 py-2 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
-                    >
-                      ← Change Symbol
-                    </button>
+                    <div className="flex space-x-4">
+                      <button
+                        onClick={() => setCurrentStep(1)}
+                        className="px-4 py-2 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg"
+                      >
+                        ← Change Symbol
+                      </button>
+                      {selectedOptions.length > 0 && (
+                        <button
+                          onClick={handleProceedToComparison}
+                          className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg"
+                        >
+                          Compare {selectedOptions.length} Option{selectedOptions.length > 1 ? 's' : ''} →
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-12 gap-8">
-                    {/* Options Table */}
-                    <div className="col-span-8">
-                      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Available Put Options</h2>
-                        </div>
-                        <div className="overflow-x-auto">
-                          <OptionsSearch 
-                            symbol={currentSymbol}
-                            onSelectOption={(option) => {
-                              setSelectedOption(option);
-                              setCurrentStep(3);
-                            }}
-                            onOptionsLoaded={handleOptionsLoaded}
-                          />
-                        </div>
-                      </div>
-                    </div>
+                  {/* Options Analysis with Selection */}
+                  <OptionsAnalysis
+                    options={currentOptions}
+                    underlyingPrice={currentPrice}
+                    symbol={currentSymbol}
+                    onSelectOption={handleSelectOptionForComparison}
+                  />
 
-                    {/* Quick Insights */}
-                    <div className="col-span-4 space-y-6">
-                      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Top Picks</h3>
-                        <OpportunitiesDashboard options={currentOptions} />
+                  {/* Show selected options for comparison */}
+                  {selectedOptions.length > 0 && (
+                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                          Selected for Comparison ({selectedOptions.length}/3)
+                        </h3>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleClearAllSelected}
+                            className="px-3 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg text-sm"
+                          >
+                            Clear All
+                          </button>
+                          <button
+                            onClick={handleProceedToComparison}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm"
+                          >
+                            Compare Options
+                          </button>
+                        </div>
                       </div>
                       
-                      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Unusual Activity</h3>
-                        <OptionsScanner options={currentOptions} symbol={currentSymbol} />
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {selectedOptions.map((result, index) => (
+                          <div key={index} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                            <div className="flex justify-between items-start mb-3">
+                              <div>
+                                <h4 className="font-semibold text-gray-900 dark:text-white">
+                                  ${result.option.strike} Put
+                                </h4>
+                                <p className="text-sm text-gray-600 dark:text-gray-400">
+                                  Expires {new Date(result.option.expiration).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => handleRemoveFromComparison(index)}
+                                className="text-gray-400 hover:text-red-500"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span>Annualized Return:</span>
+                                <span className="font-semibold text-green-600">
+                                  {(result.annualizedReturn * 100).toFixed(1)}%
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Premium:</span>
+                                <span>${result.premium.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Delta:</span>
+                                <span>{result.option.delta.toFixed(3)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
+                  )}
+
+                  {/* Original Options Search for quick single selection */}
+                  <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800">
+                    <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+                      <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                        Quick Single Option Selection
+                      </h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Click any option below to jump directly to individual analysis
+                      </p>
+                    </div>
+                    <OptionsSearch 
+                      symbol={currentSymbol}
+                      onSelectOption={handleSelectPutOption}
+                      onOptionsLoaded={handleOptionsLoaded}
+                    />
                   </div>
                 </div>
               )}
 
               {/* Step 3: Analysis & Trading */}
-              {currentStep === 3 && selectedOption && (
+              {currentStep === 3 && (
                 <div className="space-y-8">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                        Analyze Your Trade
-                      </h1>
-                      <p className="text-lg text-gray-600 dark:text-gray-400 mt-2">
-                        {selectedOption.symbol} ${selectedOption.strike} Put • Premium: ${selectedOption.bid}
-                      </p>
-                    </div>
-                    <div className="flex space-x-4">
-                      <button
-                        onClick={() => setCurrentStep(2)}
-                        className="px-4 py-2 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg"
-                      >
-                        ← Back to Options
-                      </button>
-                      <button
-                        onClick={() => setCurrentStep(4)}
-                        className="px-4 py-2 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg"
-                      >
-                        View Portfolio
-                      </button>
-                    </div>
-                  </div>
+                  {selectedOptions.length > 1 ? (
+                    // Show comparison analysis
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+                            Options Comparison Analysis
+                          </h1>
+                          <p className="text-lg text-gray-600 dark:text-gray-400 mt-2">
+                            Comparing {selectedOptions.length} {currentSymbol.toUpperCase()} put options
+                          </p>
+                        </div>
+                        <div className="flex space-x-4">
+                          <button
+                            onClick={() => setCurrentStep(2)}
+                            className="px-4 py-2 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg"
+                          >
+                            ← Back to Selection
+                          </button>
+                        </div>
+                      </div>
 
-                  {/* Trade Summary Card */}
-                  <div className="bg-gradient-to-r from-emerald-500 to-blue-600 text-white p-8 rounded-lg">
-                    <div className="grid grid-cols-1 md:grid-cols-5 gap-6 items-center">
-                      <div className="md:col-span-3">
-                        <h2 className="text-2xl font-bold mb-2">
-                          Sell {selectedOption.symbol} ${selectedOption.strike} Put
-                        </h2>
-                        <div className="grid grid-cols-3 gap-4 text-sm">
-                          <div>
-                            <div className="opacity-75">Premium per contract</div>
-                            <div className="text-xl font-bold">${selectedOption.bid}</div>
-                          </div>
-                          <div>
-                            <div className="opacity-75">Expires</div>
-                            <div className="text-xl font-bold">
-                              {Math.ceil((new Date(selectedOption.expiration).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}d
+                      <AdvancedOptionsComparison
+                        selectedOptions={selectedOptions}
+                        underlyingPrice={currentPrice}
+                        symbol={currentSymbol}
+                        onRemoveOption={handleRemoveFromComparison}
+                        onProceedToTrade={(result, contracts) => {
+                          setSelectedOption(result.option);
+                          // Store the number of contracts for later use
+                          console.log(`Selected ${contracts} contracts for ${result.option.symbol}`);
+                          setShowTradeModal(true);
+                        }}
+                        onClearAll={handleClearAllSelected}
+                      />
+                    </>
+                  ) : selectedOption ? (
+                    // Show individual analysis (existing code)
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+                            Analyze Your Trade
+                          </h1>
+                          <p className="text-lg text-gray-600 dark:text-gray-400 mt-2">
+                            {selectedOption.symbol} ${selectedOption.strike} Put • Premium: ${selectedOption.bid}
+                          </p>
+                        </div>
+                        <div className="flex space-x-4">
+                          <button
+                            onClick={() => setCurrentStep(2)}
+                            className="px-4 py-2 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg"
+                          >
+                            ← Back to Options
+                          </button>
+                          <button
+                            onClick={() => setCurrentStep(4)}
+                            className="px-4 py-2 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg"
+                          >
+                            View Portfolio
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Trade Summary Card */}
+                      <div className="bg-gradient-to-r from-emerald-500 to-blue-600 text-white p-8 rounded-lg">
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 items-center">
+                          <div className="md:col-span-3">
+                            <h2 className="text-2xl font-bold mb-2">
+                              Sell {selectedOption.symbol} ${selectedOption.strike} Put
+                            </h2>
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                              <div>
+                                <div className="opacity-75">Premium per contract</div>
+                                <div className="text-xl font-bold">${selectedOption.bid}</div>
+                              </div>
+                              <div>
+                                <div className="opacity-75">Expires</div>
+                                <div className="text-xl font-bold">
+                                  {Math.ceil((new Date(selectedOption.expiration).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}d
+                                </div>
+                              </div>
+                              <div>
+                                <div className="opacity-75">Success Probability</div>
+                                <div className="text-xl font-bold">{((1 - Math.abs(selectedOption.delta)) * 100).toFixed(0)}%</div>
+                              </div>
                             </div>
                           </div>
-                          <div>
-                            <div className="opacity-75">Success Probability</div>
-                            <div className="text-xl font-bold">{((1 - Math.abs(selectedOption.delta)) * 100).toFixed(0)}%</div>
+                          <div className="md:col-span-2 text-center">
+                            <button
+                              onClick={() => setShowTradeModal(true)}
+                              className="w-full bg-white text-emerald-600 px-8 py-4 text-xl font-bold rounded-lg hover:bg-gray-100 transition-all"
+                            >
+                              Execute Trade
+                            </button>
+                            <div className="text-sm opacity-75 mt-2">
+                              Max Risk: ${((selectedOption.strike - selectedOption.bid) * 100).toFixed(0)}
+                            </div>
                           </div>
                         </div>
                       </div>
-                      <div className="md:col-span-2 text-center">
-                        <button
-                          onClick={() => setShowTradeModal(true)}
-                          className="w-full bg-white text-emerald-600 px-8 py-4 text-xl font-bold rounded-lg hover:bg-gray-100 transition-all"
-                        >
-                          Execute Trade
-                        </button>
-                        <div className="text-sm opacity-75 mt-2">
-                          Max Risk: ${((selectedOption.strike - selectedOption.bid) * 100).toFixed(0)}
+
+                      {/* Analysis Grid */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div className="space-y-6">
+                          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
+                            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Risk Analysis</h3>
+                            <RiskProfiler 
+                              selectedOptions={[selectedOption]}
+                              underlyingPrice={currentPrice}
+                            />
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-6">
+                          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
+                            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">AI Insights</h3>
+                            <AIAnalysis 
+                              options={currentOptions}
+                              selectedOption={selectedOption}
+                              symbol={currentSymbol}
+                              underlyingPrice={currentPrice}
+                              portfolio={{
+                                cash: portfolio.cash,
+                                activePositions: trades.filter(t => t.status === 'active').length,
+                                unrealizedPnL: portfolio.unrealizedPnL
+                              }}
+                            />
+                          </div>
                         </div>
                       </div>
+                    </>
+                  ) : (
+                    // No options selected
+                    <div className="text-center py-12">
+                      <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                        No Options Selected
+                      </h2>
+                      <button
+                        onClick={() => setCurrentStep(2)}
+                        className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg"
+                      >
+                        Go Back to Browse Options
+                      </button>
                     </div>
-                  </div>
-
-                  {/* Analysis Grid */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div className="space-y-6">
-                      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
-                        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Risk Analysis</h3>
-                        <RiskProfiler 
-                          selectedOptions={[selectedOption]}
-                          underlyingPrice={currentPrice}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-6">
-                      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
-                        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">AI Insights</h3>
-                        <AIAnalysis 
-                          options={currentOptions}
-                          selectedOption={selectedOption}
-                          symbol={currentSymbol}
-                          underlyingPrice={currentPrice}
-                          portfolio={{
-                            cash: portfolio.cash,
-                            activePositions: trades.filter(t => t.status === 'active').length,
-                            unrealizedPnL: portfolio.unrealizedPnL
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -665,6 +898,16 @@ export default function Home() {
           option={selectedOption}
           onConfirm={handleSellPut}
           onCancel={() => setShowTradeModal(false)}
+        />
+      )}
+
+      {/* Options Analysis */}
+      {currentOptions.length > 0 && (
+        <OptionsAnalysis
+          options={currentOptions}
+          underlyingPrice={currentPrice}
+          symbol={currentSymbol}
+          onSelectOption={handleSelectOption}
         />
       )}
     </div>
