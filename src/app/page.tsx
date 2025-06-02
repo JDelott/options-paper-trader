@@ -21,6 +21,15 @@ const OptionsSearch = dynamic(() => import('./components/OptionsSearch').then(mo
   )
 });
 
+// Add interface for stock data
+interface StockData {
+  symbol: string;
+  name: string;
+  price: number;
+  loading: boolean;
+  error?: string;
+}
+
 export default function Home() {
   const [selectedOption, setSelectedOption] = useState<PutOption | null>(null);
   const [showTradeModal, setShowTradeModal] = useState(false);
@@ -29,12 +38,126 @@ export default function Home() {
   const [currentSymbol, setCurrentSymbol] = useState<string>('SPY');
   const [currentPrice, setCurrentPrice] = useState<number>(580);
   const [activeView, setActiveView] = useState<'trading' | 'scenario'>('trading');
+  const [currentStep, setCurrentStep] = useState(1);
+  const [searchSymbol, setSearchSymbol] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  
+  // State for default stocks with real-time prices
+  const [defaultStocks, setDefaultStocks] = useState<StockData[]>([
+    { symbol: 'SPY', name: 'S&P 500 ETF', price: 0, loading: true },
+    { symbol: 'QQQ', name: 'Nasdaq ETF', price: 0, loading: true },
+    { symbol: 'AAPL', name: 'Apple Inc.', price: 0, loading: true },
+    { symbol: 'MSFT', name: 'Microsoft', price: 0, loading: true },
+    { symbol: 'TSLA', name: 'Tesla Inc.', price: 0, loading: true },
+    { symbol: 'NVDA', name: 'NVIDIA', price: 0, loading: true }
+  ]);
+
   const [portfolio, setPortfolio] = useState({
     cash: 10000,
     totalValue: 10000,
     unrealizedPnL: 0
   });
-  const [currentStep, setCurrentStep] = useState(1);
+
+  // Function to fetch real-time stock price
+  const fetchStockPrice = useCallback(async (symbol: string): Promise<number> => {
+    try {
+      const response = await fetch(`/api/tradier?symbol=${symbol.toUpperCase()}&_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to fetch stock price');
+      }
+      
+      return data.underlyingPrice || 0;
+    } catch (error) {
+      console.error(`Error fetching price for ${symbol}:`, error);
+      throw error;
+    }
+  }, []);
+
+  // Function to validate and search for a symbol
+  const handleSymbolSearch = useCallback(async (symbol: string) => {
+    if (!symbol.trim()) return;
+    
+    setSearchLoading(true);
+    setSearchError('');
+    
+    try {
+      const price = await fetchStockPrice(symbol);
+      
+      if (price > 0) {
+        setCurrentSymbol(symbol.toUpperCase());
+        setCurrentPrice(price);
+        setCurrentStep(2);
+        setSearchSymbol('');
+      } else {
+        setSearchError('Invalid symbol or no price data available');
+      }
+    } catch (error) {
+      setSearchError('Symbol not found or invalid');
+      console.error('Search error:', error);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [fetchStockPrice]);
+
+  // Function to select a default stock
+  const handleStockSelection = useCallback(async (stockData: StockData) => {
+    if (stockData.loading) return;
+    
+    try {
+      // Fetch fresh price to ensure accuracy
+      const freshPrice = await fetchStockPrice(stockData.symbol);
+      setCurrentSymbol(stockData.symbol);
+      setCurrentPrice(freshPrice);
+      setCurrentStep(2);
+    } catch (error) {
+      console.error(`Error selecting ${stockData.symbol}:`, error);
+      // Fallback to cached price if fresh fetch fails
+      setCurrentSymbol(stockData.symbol);
+      setCurrentPrice(stockData.price);
+      setCurrentStep(2);
+    }
+  }, [fetchStockPrice]);
+
+  // Load real-time prices for default stocks on component mount
+  useEffect(() => {
+    const loadDefaultStockPrices = async () => {
+      console.log('🔄 Loading real-time prices for default stocks...');
+      
+      const updatedStocks = await Promise.all(
+        defaultStocks.map(async (stock) => {
+          try {
+            const price = await fetchStockPrice(stock.symbol);
+            console.log(`✅ ${stock.symbol}: $${price}`);
+            return { ...stock, price, loading: false };
+          } catch (error) {
+            console.error(`❌ Failed to load ${stock.symbol}:`, error);
+            return { 
+              ...stock, 
+              price: 0, 
+              loading: false, 
+              error: 'Failed to load price' 
+            };
+          }
+        })
+      );
+      
+      setDefaultStocks(updatedStocks);
+      console.log('✅ All default stock prices loaded');
+    };
+
+    loadDefaultStockPrices();
+  }, [fetchStockPrice]);
 
   const calculatePortfolioValue = useCallback(() => {
     const premiumCollected = trades.filter(trade => trade.status === 'active').reduce((sum, trade) => sum + trade.premiumReceived, 0);
@@ -199,7 +322,7 @@ export default function Home() {
             </div>
 
             <div className="max-w-7xl mx-auto px-6 py-8">
-              {/* Step 1: Symbol Selection */}
+              {/* Step 1: Symbol Selection with Real-Time Data */}
               {currentStep === 1 && (
                 <div className="max-w-4xl mx-auto text-center space-y-8">
                   <div>
@@ -211,56 +334,87 @@ export default function Home() {
                     </p>
                   </div>
                   
+                  {/* Real-Time Default Stocks */}
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                    {[
-                      { symbol: 'SPY', name: 'S&P 500 ETF', price: 580 },
-                      { symbol: 'QQQ', name: 'Nasdaq ETF', price: 525 },
-                      { symbol: 'AAPL', name: 'Apple Inc.', price: 245 },
-                      { symbol: 'MSFT', name: 'Microsoft', price: 450 },
-                      { symbol: 'TSLA', name: 'Tesla Inc.', price: 350 },
-                      { symbol: 'NVDA', name: 'NVIDIA', price: 900 }
-                    ].map(item => (
+                    {defaultStocks.map(stock => (
                       <button
-                        key={item.symbol}
-                        onClick={() => {
-                          setCurrentSymbol(item.symbol);
-                          setCurrentPrice(item.price);
-                          setCurrentStep(2);
-                        }}
-                        className="p-6 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-emerald-500 transition-all text-center group"
+                        key={stock.symbol}
+                        onClick={() => handleStockSelection(stock)}
+                        disabled={stock.loading}
+                        className={`p-6 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-emerald-500 transition-all text-center group ${
+                          stock.loading ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-lg'
+                        }`}
                       >
                         <div className="text-2xl font-bold text-gray-900 dark:text-white group-hover:text-emerald-600">
-                          {item.symbol}
+                          {stock.symbol}
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                          {item.name}
+                          {stock.name}
                         </div>
-                        <div className="text-lg font-semibold text-emerald-600 mt-2">
-                          ${item.price}
+                        <div className="mt-2">
+                          {stock.loading ? (
+                            <div className="flex items-center justify-center">
+                              <div className="animate-spin w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full"></div>
+                            </div>
+                          ) : stock.error ? (
+                            <div className="text-xs text-red-500">Error loading</div>
+                          ) : (
+                            <div className="text-lg font-semibold text-emerald-600">
+                              ${stock.price.toFixed(2)}
+                            </div>
+                          )}
                         </div>
                       </button>
                     ))}
                   </div>
 
-                  <div className="mt-8 p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center justify-center space-x-4">
-                      <input
-                        type="text"
-                        placeholder="Or enter any symbol..."
-                        className="px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white w-64"
-                        onKeyPress={(e) => {
-                          if (e.key === 'Enter') {
-                            const symbol = (e.target as HTMLInputElement).value.toUpperCase();
-                            if (symbol) {
-                              setCurrentSymbol(symbol);
-                              setCurrentStep(2);
+                  {/* Enhanced Search Section */}
+                  <div className="mt-8 p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-center space-x-4">
+                        <input
+                          type="text"
+                          placeholder="Enter any symbol (e.g., AMZN, GOOGL)..."
+                          value={searchSymbol}
+                          onChange={(e) => {
+                            setSearchSymbol(e.target.value.toUpperCase());
+                            setSearchError(''); // Clear error when typing
+                          }}
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter') {
+                              handleSymbolSearch(searchSymbol);
                             }
-                          }
-                        }}
-                      />
-                      <button className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium">
-                        Search
-                      </button>
+                          }}
+                          className="px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white w-64 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          disabled={searchLoading}
+                        />
+                        <button 
+                          onClick={() => handleSymbolSearch(searchSymbol)}
+                          disabled={searchLoading || !searchSymbol.trim()}
+                          className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                        >
+                          {searchLoading ? (
+                            <div className="flex items-center space-x-2">
+                              <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                              <span>Searching...</span>
+                            </div>
+                          ) : (
+                            'Search'
+                          )}
+                        </button>
+                      </div>
+                      
+                      {/* Search Error Message */}
+                      {searchError && (
+                        <div className="text-red-500 text-sm text-center">
+                          {searchError}
+                        </div>
+                      )}
+                      
+                      {/* Popular symbols suggestion */}
+                      <div className="text-center text-sm text-gray-500 dark:text-gray-400">
+                        <p>Popular symbols: AMD, AMZN, GOOGL, META, NFLX, CRM, DIS, BA, JPM, GE</p>
+                      </div>
                     </div>
                   </div>
                 </div>

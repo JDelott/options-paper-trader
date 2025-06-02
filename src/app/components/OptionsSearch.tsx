@@ -11,49 +11,20 @@ interface OptionsSearchProps {
 
 type SortOption = 'strike' | 'premium' | 'volume' | 'oi';
 
-// Define the Greeks API response type
-interface GreeksCalculation {
-  delta: number;
-  gamma: number;
-  theta: number;
-  vega: number;
-  rho: number;
-}
-
-interface GreeksOption {
-  strike: number;
-  expiration: string;
-  daysToExpiry: number;
-  call: GreeksCalculation;
-  put: GreeksCalculation;
-}
-
 export function OptionsSearch({ onSelectOption, onOptionsLoaded, symbol = 'SPY' }: OptionsSearchProps) {
   const [options, setOptions] = useState<PutOption[]>([]);
   const [loading, setLoading] = useState(false);
-  const [underlyingPrice, setUnderlyingPrice] = useState<number>(0);
-  const [currentSymbol, setCurrentSymbol] = useState(symbol);
-  const [selectedExpiration, setSelectedExpiration] = useState<string>('all');
+  const [selectedExpiration, setSelectedExpiration] = useState('all');
   const [sortBy, setSortBy] = useState<SortOption>('strike');
   const [filterOTM, setFilterOTM] = useState(false);
-  
-  const onOptionsLoadedRef = useRef(onOptionsLoaded);
-  onOptionsLoadedRef.current = onOptionsLoaded;
-
-  // Add a refresh key to force React to re-render everything
+  const [underlyingPrice, setUnderlyingPrice] = useState(0);
+  const [currentSymbol, setCurrentSymbol] = useState(symbol);
   const [refreshKey, setRefreshKey] = useState(0);
-
-  // Add unique ID to track multiple instances
-  const instanceId = useRef(Math.random().toString(36).substr(2, 9));
   
-  const [hasRealData, setHasRealData] = useState(false);
+  const instanceId = useRef(`${Math.random().toString(36).substring(2, 11)}`);
+  const onOptionsLoadedRef = useRef(onOptionsLoaded);
   
   console.log(`🏷️ OptionsSearch Instance: ${instanceId.current} - Rendering with ${options.length} options`);
-
-  const fetchFallbackOptions = useCallback(async (searchSymbol: string) => {
-    console.log(`🚫 FALLBACK DISABLED for ${searchSymbol} - preventing data contamination`);
-    return;
-  }, []);
 
   const searchOptions = useCallback(async (searchSymbol: string) => {
     if (!searchSymbol) return;
@@ -70,7 +41,6 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded, symbol = 'SPY' 
     setOptions([]);
     setUnderlyingPrice(0);
     setSelectedExpiration('all');
-    setHasRealData(false);
     
     try {
       console.log(`🔍 Instance ${instanceId.current} - Fetching real-time data for ${searchSymbol}...`);
@@ -124,7 +94,6 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded, symbol = 'SPY' 
       setOptions(putsWithBasicGreeks);
       setUnderlyingPrice(data.underlyingPrice || 0);
       setRefreshKey(timestamp);
-      setHasRealData(true);
       
       if (onOptionsLoadedRef.current) {
         onOptionsLoadedRef.current(putsWithBasicGreeks, searchSymbol.toUpperCase(), data.underlyingPrice || 0);
@@ -135,10 +104,8 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded, symbol = 'SPY' 
     } catch (error) {
       console.error(`❌ Instance ${instanceId.current} - Error fetching real-time options:`, error);
       
-      // COMPLETELY DISABLE FALLBACK for now to prevent contamination
-      console.log(`🚫 Instance ${instanceId.current} - Fallback disabled to prevent data contamination`);
-      
-      // Just show error state instead
+      // Just show error state instead of fallback
+      console.log(`🚫 Instance ${instanceId.current} - No fallback to prevent data contamination`);
       setOptions([]);
       setUnderlyingPrice(0);
     }
@@ -358,32 +325,209 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded, symbol = 'SPY' 
         </div>
       </div>
 
-      {/* TEMP: Replace the entire table with debug output */}
-      <div className="p-4 space-y-2 max-h-96 overflow-y-auto">
-        <div className="text-sm font-mono">
-          <div>Instance: {instanceId.current}</div>
-          <div>Options in state: {options.length}</div>
-          <div>Filtered options: {filteredOptions.length}</div>
-          <div>Refresh key: {refreshKey}</div>
-        </div>
-        
-        {filteredOptions.slice(0, 10).map((option, index) => (
-          <div 
-            key={`debug-${refreshKey}-${index}`}
-            className="p-2 border border-gray-300 text-sm"
-          >
-            <div>Strike: ${option.strike}</div>
-            <div>Exp: {option.expiration}</div>
-            <div>Bid: ${option.bid} | Ask: ${option.ask}</div>
-            <div>Delta: {option.delta?.toFixed(3)} | Theta: {option.theta?.toFixed(3)}</div>
-            <div>Symbol: {option.symbol}</div>
-          </div>
-        ))}
+      {/* Options Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-gray-50 dark:bg-gray-800">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Strike
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Expiration
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Bid/Ask
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                IV
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Delta
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Theta
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Volume
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                OI
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Moneyness
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+            {filteredOptions.slice(0, 50).map((option) => {
+              const daysToExpiry = calculateDaysToExpiry(option.expiration);
+              const moneyness = getMoneyness(option.strike, underlyingPrice);
+              const spread = option.ask - option.bid;
+              const midPrice = (option.bid + option.ask) / 2;
+              
+              return (
+                <tr 
+                  key={`${option.symbol}-${refreshKey}`}
+                  onClick={() => onSelectOption(option)}
+                  className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                >
+                  {/* Strike */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <span className={`text-sm font-semibold ${
+                        moneyness === 'ITM' ? 'text-green-600 dark:text-green-400' :
+                        moneyness === 'ATM' ? 'text-yellow-600 dark:text-yellow-400' :
+                        'text-gray-600 dark:text-gray-400'
+                      }`}>
+                        ${option.strike}
+                      </span>
+                      {moneyness === 'ATM' && (
+                        <span className="ml-2 px-2 py-1 text-xs bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded">
+                          ATM
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  
+                  {/* Expiration */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="text-sm text-gray-900 dark:text-white">
+                      {formatDate(option.expiration)}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {daysToExpiry}d
+                    </div>
+                  </td>
+                  
+                  {/* Bid/Ask */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="text-sm">
+                      <span className="text-red-600 dark:text-red-400">{formatCurrency(option.bid)}</span>
+                      <span className="text-gray-400 mx-1">/</span>
+                      <span className="text-green-600 dark:text-green-400">{formatCurrency(option.ask)}</span>
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      Mid: {formatCurrency(midPrice)}
+                    </div>
+                  </td>
+                  
+                  {/* Implied Volatility */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`text-sm ${
+                      option.impliedVolatility > 0.5 ? 'text-red-600 dark:text-red-400' :
+                      option.impliedVolatility > 0.3 ? 'text-yellow-600 dark:text-yellow-400' :
+                      'text-green-600 dark:text-green-400'
+                    }`}>
+                      {formatPercent(option.impliedVolatility)}
+                    </span>
+                  </td>
+                  
+                  {/* Delta */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <span className="text-sm text-gray-900 dark:text-white">
+                        {formatGreek(option.delta || 0)}
+                      </span>
+                      <div className={`ml-2 w-8 h-2 rounded-full ${
+                        Math.abs(option.delta || 0) > 0.7 ? 'bg-red-200 dark:bg-red-800' :
+                        Math.abs(option.delta || 0) > 0.3 ? 'bg-yellow-200 dark:bg-yellow-800' :
+                        'bg-green-200 dark:bg-green-800'
+                      }`}>
+                        <div 
+                          className={`h-2 rounded-full ${
+                            Math.abs(option.delta || 0) > 0.7 ? 'bg-red-500' :
+                            Math.abs(option.delta || 0) > 0.3 ? 'bg-yellow-500' :
+                            'bg-green-500'
+                          }`}
+                          style={{ width: `${Math.abs(option.delta || 0) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  </td>
+                  
+                  {/* Theta */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`text-sm ${
+                      Math.abs(option.theta || 0) > 0.05 ? 'text-red-600 dark:text-red-400' :
+                      'text-gray-600 dark:text-gray-400'
+                    }`}>
+                      {formatGreek(option.theta || 0)}
+                    </span>
+                  </td>
+                  
+                  {/* Volume */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`text-sm ${
+                      option.volume > 100 ? 'text-green-600 dark:text-green-400' :
+                      option.volume > 10 ? 'text-yellow-600 dark:text-yellow-400' :
+                      'text-gray-500 dark:text-gray-400'
+                    }`}>
+                      {option.volume.toLocaleString()}
+                    </span>
+                  </td>
+                  
+                  {/* Open Interest */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`text-sm ${
+                      option.openInterest > 1000 ? 'text-green-600 dark:text-green-400' :
+                      option.openInterest > 100 ? 'text-yellow-600 dark:text-yellow-400' :
+                      'text-gray-500 dark:text-gray-400'
+                    }`}>
+                      {option.openInterest.toLocaleString()}
+                    </span>
+                  </td>
+                  
+                  {/* Moneyness */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                      moneyness === 'ITM' ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' :
+                      moneyness === 'ATM' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' :
+                      'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'
+                    }`}>
+                      {moneyness}
+                    </span>
+                    {spread > 0 && (
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Spread: {formatCurrency(spread)}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
       
-      {filteredOptions.length === 0 && (
+      {/* Pagination/Load More */}
+      {filteredOptions.length > 50 && (
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 text-center">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Showing first 50 of {filteredOptions.length} options
+          </p>
+          <button 
+            onClick={() => {
+              // Could implement pagination here
+            }}
+            className="mt-2 px-4 py-2 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
+          >
+            Load More
+          </button>
+        </div>
+      )}
+      
+      {filteredOptions.length === 0 && !loading && (
         <div className="p-8 text-center">
-          <p className="text-gray-500 dark:text-gray-400">No options found matching your criteria.</p>
+          <div className="text-gray-400 dark:text-gray-600 mb-2">
+            <svg className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          </div>
+          <p className="text-gray-500 dark:text-gray-400 text-lg font-medium">No options found</p>
+          <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">
+            Try adjusting your filters or selecting a different symbol
+          </p>
         </div>
       )}
     </div>
