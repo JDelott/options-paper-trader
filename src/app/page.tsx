@@ -5,6 +5,7 @@ import { OptionsSearch } from './components/OptionsSearch';
 import { Portfolio } from './components/Portfolio';
 import { TradeModal } from './components/TradeModal';
 import { AIAnalysis } from './components/AIAnalysis';
+import { ScenarioAnalysis } from './components/ScenarioAnalysis';
 import { PutOption, Trade } from './types';
 
 export default function Home() {
@@ -14,6 +15,7 @@ export default function Home() {
   const [currentOptions, setCurrentOptions] = useState<PutOption[]>([]);
   const [currentSymbol, setCurrentSymbol] = useState<string>('SPY');
   const [currentPrice, setCurrentPrice] = useState<number>(580);
+  const [activeView, setActiveView] = useState<'trading' | 'scenario'>('trading');
   const [portfolio, setPortfolio] = useState({
     cash: 10000,
     totalValue: 10000,
@@ -89,7 +91,7 @@ export default function Home() {
               </p>
             </div>
             
-            {/* Portfolio Stats - Horizontal Layout */}
+            {/* Portfolio Stats */}
             <div className="flex items-center gap-8">
               <div className="text-center">
                 <div className="text-xs text-gray-500 uppercase tracking-wider font-medium">Total Value</div>
@@ -111,52 +113,106 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {/* Navigation Tabs */}
+          <div className="flex border-b border-gray-200 dark:border-gray-700">
+            <button
+              onClick={() => setActiveView('trading')}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeView === 'trading'
+                  ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+              }`}
+            >
+              Live Trading
+            </button>
+            <button
+              onClick={() => setActiveView('scenario')}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeView === 'scenario'
+                  ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+              }`}
+            >
+              Crash Scenario Analysis
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-[1600px] mx-auto px-6 lg:px-8 py-6">
-        {/* Top Row - Options Chain and AI Analysis */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
-          {/* Options Chain - Takes 3/4 width */}
-          <div className="lg:col-span-3">
-            <OptionsSearch 
-              onSelectOption={(option) => {
-                setSelectedOption(option);
-                setShowTradeModal(true);
-              }}
-              onOptionsLoaded={handleOptionsLoaded}
-            />
-          </div>
-          
-          {/* AI Analysis Sidebar - Takes 1/4 width, full height */}
-          <div className="lg:col-span-1">
-            <div className="h-[600px]">
-              <AIAnalysis 
-                options={currentOptions}
-                selectedOption={selectedOption}
-                symbol={currentSymbol}
-                underlyingPrice={currentPrice}
-                portfolio={{
-                  cash: portfolio.cash,
-                  activePositions: activeTrades.length,
-                  unrealizedPnL: portfolio.unrealizedPnL
-                }}
-              />
+        {activeView === 'trading' ? (
+          <>
+            {/* Trading View */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
+              <div className="lg:col-span-3">
+                <OptionsSearch 
+                  onSelectOption={(option) => {
+                    setSelectedOption(option);
+                    setShowTradeModal(true);
+                  }}
+                  onOptionsLoaded={handleOptionsLoaded}
+                />
+              </div>
+              <div className="lg:col-span-1">
+                <div className="h-[600px]">
+                  <AIAnalysis 
+                    options={currentOptions}
+                    selectedOption={selectedOption}
+                    symbol={currentSymbol}
+                    underlyingPrice={currentPrice}
+                    portfolio={{
+                      cash: portfolio.cash,
+                      activePositions: activeTrades.length,
+                      unrealizedPnL: portfolio.unrealizedPnL
+                    }}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-
-        {/* Bottom Row - Portfolio (Full Width) */}
-        <div>
-          <Portfolio trades={trades} onCloseTrade={(tradeId) => {
-            setTrades(prev => prev.map(trade => 
-              trade.id === tradeId 
-                ? { ...trade, status: 'closed' as const, closeDate: new Date().toISOString() }
-                : trade
-            ));
-          }} />
-        </div>
+            <div>
+              <Portfolio trades={trades} onCloseTrade={(tradeId) => {
+                setTrades(prev => prev.map(trade => 
+                  trade.id === tradeId 
+                    ? { ...trade, status: 'closed' as const, closeDate: new Date().toISOString() }
+                    : trade
+                ));
+              }} />
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Scenario Analysis View */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+              <div className="lg:col-span-2">
+                <ScenarioAnalysis 
+                  options={currentOptions}
+                  symbol={currentSymbol}
+                  currentPrice={currentPrice}
+                />
+              </div>
+              <div className="lg:col-span-1">
+                <OptionsSearch 
+                  onSelectOption={(option) => {
+                    setSelectedOption(option);
+                    setShowTradeModal(true);
+                  }}
+                  onOptionsLoaded={handleOptionsLoaded}
+                />
+              </div>
+            </div>
+            <div>
+              <Portfolio trades={trades} onCloseTrade={(tradeId) => {
+                setTrades(prev => prev.map(trade => 
+                  trade.id === tradeId 
+                    ? { ...trade, status: 'closed' as const, closeDate: new Date().toISOString() }
+                    : trade
+                ));
+              }} />
+            </div>
+          </>
+        )}
       </main>
 
       {/* Trade Modal */}
