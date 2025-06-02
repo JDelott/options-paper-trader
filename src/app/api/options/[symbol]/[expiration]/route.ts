@@ -102,10 +102,12 @@ interface OptionChain {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { symbol: string; expiration: string } }
+  { params }: { params: Promise<{ symbol: string; expiration: string }> }
 ) {
-  const symbol = params.symbol.toUpperCase();
-  const expiration = params.expiration;
+  // Await params for Next.js 15 compatibility
+  const resolvedParams = await params;
+  const symbol = resolvedParams.symbol.toUpperCase();
+  const expiration = resolvedParams.expiration;
   const cacheKey = `options:${symbol}:${expiration}`;
 
   // Validate expiration format (YYYY-MM-DD)

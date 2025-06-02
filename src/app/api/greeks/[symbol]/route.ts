@@ -39,6 +39,21 @@ function calculateGreeks(
   sigma: number, // Volatility
   optionType: 'call' | 'put'
 ): GreeksCalculation {
+  // Handle edge cases
+  if (T <= 0) {
+    return {
+      delta: optionType === 'put' ? (S < K ? -1 : 0) : (S > K ? 1 : 0),
+      gamma: 0,
+      theta: 0,
+      vega: 0,
+      rho: 0
+    };
+  }
+
+  if (sigma <= 0) {
+    sigma = 0.01; // Minimum volatility
+  }
+
   const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
   const d2 = d1 - sigma * Math.sqrt(T);
 
@@ -86,9 +101,11 @@ interface GreeksResponse {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { symbol: string } }
+  { params }: { params: Promise<{ symbol: string }> }
 ) {
-  const symbol = params.symbol.toUpperCase();
+  // Await params for Next.js 15 compatibility
+  const resolvedParams = await params;
+  const symbol = resolvedParams.symbol.toUpperCase();
   const { searchParams } = new URL(request.url);
   const expiration = searchParams.get('expiration');
 
@@ -149,20 +166,43 @@ export async function GET(
     const expiryDate = new Date(expiration);
     const now = new Date();
     const daysToExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    const timeToExpiry = daysToExpiry / 365;
+    const timeToExpiry = Math.max(daysToExpiry / 365, 1/365); // Minimum 1 day
 
-    // Estimate implied volatility (simplified - in production, use more sophisticated methods)
-    const impliedVolatility = 0.25; // 25% default IV
-    const riskFreeRate = 0.05; // 5% risk-free rate
+    // Use dynamic implied volatility based on symbol and market conditions
+    const getImpliedVolatility = (symbol: string, strike: number, underlyingPrice: number): number => {
+      const baseIV: { [key: string]: number } = {
+        'AAPL': 0.30, 'MSFT': 0.25, 'GOOGL': 0.28, 'TSLA': 0.50, 'NVDA': 0.40,
+        'SPY': 0.18, 'QQQ': 0.22, 'IWM': 0.25
+      };
+      
+      const base = baseIV[symbol] || 0.25;
+      const moneyness = strike / underlyingPrice;
+      
+      // IV smile: higher IV for OTM options
+      const ivAdjustment = Math.abs(moneyness - 1) * 0.1;
+      return Math.max(0.05, base + ivAdjustment);
+    };
+
+    const riskFreeRate = 0.045; // Current risk-free rate ~4.5%
 
     // Get unique strikes and ensure they are numbers
     const strikes = [...new Set(options.map((opt: TradierOption) => Number(opt.strike)))]
       .filter((strike): strike is number => !isNaN(strike))
       .sort((a: number, b: number) => a - b);
 
+    console.log(`📊 Processing ${strikes.length} strikes for ${symbol} ${expiration}`);
+    console.log(`📈 Underlying price: $${underlyingPrice}, Time to expiry: ${daysToExpiry} days`);
+
     const greeksData = strikes.map((strike: number) => {
+      const impliedVolatility = getImpliedVolatility(symbol, strike, underlyingPrice);
+      
       const callGreeks = calculateGreeks(underlyingPrice, strike, timeToExpiry, riskFreeRate, impliedVolatility, 'call');
       const putGreeks = calculateGreeks(underlyingPrice, strike, timeToExpiry, riskFreeRate, impliedVolatility, 'put');
+
+      // Debug output for a few key strikes
+      if (strike === 200 || strike === 190 || strike === 210) {
+        console.log(`🔍 Strike $${strike}: Put Δ=${putGreeks.delta.toFixed(3)}, Θ=${putGreeks.theta.toFixed(3)}, IV=${(impliedVolatility*100).toFixed(1)}%`);
+      }
 
       return {
         strike,

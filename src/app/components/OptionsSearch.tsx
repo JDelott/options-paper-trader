@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { PutOption } from '../types';
 
 interface OptionsSearchProps {
@@ -10,6 +10,23 @@ interface OptionsSearchProps {
 }
 
 type SortOption = 'strike' | 'premium' | 'volume' | 'oi';
+
+// Define the Greeks API response type
+interface GreeksCalculation {
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  rho: number;
+}
+
+interface GreeksOption {
+  strike: number;
+  expiration: string;
+  daysToExpiry: number;
+  call: GreeksCalculation;
+  put: GreeksCalculation;
+}
 
 export function OptionsSearch({ onSelectOption, onOptionsLoaded, symbol = 'SPY' }: OptionsSearchProps) {
   const [options, setOptions] = useState<PutOption[]>([]);
@@ -23,150 +40,152 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded, symbol = 'SPY' 
   const onOptionsLoadedRef = useRef(onOptionsLoaded);
   onOptionsLoadedRef.current = onOptionsLoaded;
 
-  const getBasePrice = (sym: string): number => {
-    const prices: { [key: string]: number } = {
-      'SPY': 580, 'QQQ': 525, 'AAPL': 245, 'MSFT': 450,
-      'TSLA': 350, 'NVDA': 900, 'AMZN': 190, 'GOOGL': 175
-    };
-    return prices[sym] || 100;
-  };
+  // Add a refresh key to force React to re-render everything
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const generateSimulatedOptions = (searchSymbol: string) => {
-    const basePrice = getBasePrice(searchSymbol);
-    setUnderlyingPrice(basePrice);
-    
-    const expirations: string[] = [];
-    const today = new Date();
-    
-    // Simple approach: Add specific days from today
-    const daysToAdd = [
-      7, 14, 21, 28,           // Weeklies
-      35, 42, 49, 56,          // More weeklies
-      70, 84, 98, 112,         // ~2-4 months
-      140, 168, 196, 224,      // ~5-8 months
-      252, 280, 308, 336,      // ~9-12 months
-      365, 420, 475, 530,      // 1-1.5 years
-      585, 640, 695, 750,      // 1.5-2 years
-      730, 1095, 1460          // LEAPS
-    ];
-    
-    daysToAdd.forEach(days => {
-      const date = new Date(today);
-      date.setDate(today.getDate() + days);
-      
-      // Format as YYYY-MM-DD
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      const dateString = `${year}-${month}-${day}`;
-      
-      expirations.push(dateString);
-    });
-    
-    // Add some monthly options for good measure
-    for (let month = 1; month <= 24; month++) {
-      const date = new Date(today);
-      date.setMonth(today.getMonth() + month);
-      date.setDate(15); // 15th of each month
-      
-      const year = date.getFullYear();
-      const monthStr = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      const dateString = `${year}-${monthStr}-${day}`;
-      
-      expirations.push(dateString);
-    }
-    
-    // Remove duplicates and sort
-    const uniqueExpirations = [...new Set(expirations)].sort();
-    
-    console.log('Generated expirations:', uniqueExpirations);
-    console.log('Total unique expirations:', uniqueExpirations.length);
-    
-    const simulatedOptions: PutOption[] = [];
-    
-    uniqueExpirations.forEach(expiration => {
-      const timeToExpiry = (new Date(expiration).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-      
-      // Generate strikes from 30% below to 15% above current price
-      for (let i = -30; i <= 15; i++) {
-        const strike = Math.round((basePrice * (1 + i * 0.01)) * 100) / 100;
-        if (strike <= 0) continue;
-        
-        const moneyness = strike / basePrice;
-        const intrinsicValue = Math.max(0, strike - basePrice);
-        const timeValue = Math.max(0.01, 
-          0.05 * Math.sqrt(timeToExpiry / 365) * basePrice * 
-          (0.20 + Math.random() * 0.15) *
-          Math.exp(-Math.abs(moneyness - 1) * 2)
-        );
-        
-        const bid = Math.max(0.01, intrinsicValue + timeValue * 0.95);
-        
-        simulatedOptions.push({
-          symbol: searchSymbol,
-          strike,
-          expiration,
-          bid: Math.round(bid * 100) / 100,
-          ask: Math.round(bid * 1.05 * 100) / 100,
-          impliedVolatility: 0.15 + Math.random() * 0.25,
-          openInterest: Math.floor(Math.random() * 1000) + 100,
-          volume: Math.floor(Math.random() * 500) + 10,
-          delta: Math.round((moneyness < 1 ? 0.05 + (1 - moneyness) * 0.9 : 0.05) * 1000) / 1000,
-          gamma: Math.round(Math.random() * 0.1 * 1000) / 1000,
-          theta: -Math.round((bid * 0.05 * (365 / Math.max(timeToExpiry, 1))) * 1000) / 1000,
-          underlyingPrice: basePrice
-        });
-      }
-    });
-    
-    console.log(`Generated ${simulatedOptions.length} total options across ${uniqueExpirations.length} expiration dates`);
-    
-    setOptions(simulatedOptions);
-    
-    if (onOptionsLoadedRef.current) {
-      onOptionsLoadedRef.current(simulatedOptions, searchSymbol.toUpperCase(), basePrice);
-    }
-  };
+  // Add unique ID to track multiple instances
+  const instanceId = useRef(Math.random().toString(36).substr(2, 9));
+  
+  const [hasRealData, setHasRealData] = useState(false);
+  
+  console.log(`🏷️ OptionsSearch Instance: ${instanceId.current} - Rendering with ${options.length} options`);
 
-  const searchOptions = async (searchSymbol: string) => {
+  const fetchFallbackOptions = useCallback(async (searchSymbol: string) => {
+    console.log(`🚫 FALLBACK DISABLED for ${searchSymbol} - preventing data contamination`);
+    return;
+  }, []);
+
+  const searchOptions = useCallback(async (searchSymbol: string) => {
     if (!searchSymbol) return;
     
+    // Prevent multiple simultaneous calls
+    if (loading) {
+      console.log(`🚫 Already loading ${searchSymbol}, skipping duplicate call`);
+      return;
+    }
+    
     setLoading(true);
+    
+    // Clear ALL state immediately and aggressively
+    setOptions([]);
+    setUnderlyingPrice(0);
+    setSelectedExpiration('all');
+    setHasRealData(false);
+    
     try {
-      const response = await fetch(`/api/options?symbol=${searchSymbol.toUpperCase()}`);
+      console.log(`🔍 Instance ${instanceId.current} - Fetching real-time data for ${searchSymbol}...`);
+      
+      const timestamp = Date.now();
+      const response = await fetch(`/api/tradier?symbol=${searchSymbol.toUpperCase()}&_t=${timestamp}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      
       const data = await response.json();
       
-      if (data.success) {
-        setOptions(data.puts || []);
-        setUnderlyingPrice(data.underlyingPrice || 0);
-        
-        if (onOptionsLoadedRef.current) {
-          onOptionsLoadedRef.current(data.puts || [], searchSymbol.toUpperCase(), data.underlyingPrice || 0);
-        }
-      } else {
-        console.error('Failed to fetch options:', data.error);
-        generateSimulatedOptions(searchSymbol);
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to fetch data');
       }
+
+      console.log(`✅ Instance ${instanceId.current} - Got real Tradier data: ${data.puts?.length} puts, price: $${data.underlyingPrice}`);
+      
+      // Verify data quality before using it
+      const rawPuts = data.puts || [];
+      const validPuts = rawPuts.filter((put: PutOption) => 
+        put.strike > 0 && 
+        put.expiration && 
+        put.symbol && 
+        put.strike >= 50 // Filter out fake low strikes
+      );
+      
+      if (validPuts.length === 0) {
+        throw new Error('No valid options data received');
+      }
+      
+      console.log(`🧹 Instance ${instanceId.current} - Filtered ${rawPuts.length} -> ${validPuts.length} valid puts`);
+      
+      // Add basic Greeks
+      const putsWithBasicGreeks = validPuts.map((put: PutOption, index: number) => ({
+        ...put,
+        delta: put.delta || -0.5,
+        gamma: put.gamma || 0.01,
+        theta: put.theta || -0.02,
+        impliedVolatility: put.impliedVolatility || 0.25,
+        _renderKey: `${instanceId.current}_${timestamp}_${index}` // Unique key per instance
+      }));
+      
+      console.log(`🎯 Instance ${instanceId.current} - Setting ${putsWithBasicGreeks.length} valid options`);
+      
+      // ONLY set state if we have valid data
+      setOptions(putsWithBasicGreeks);
+      setUnderlyingPrice(data.underlyingPrice || 0);
+      setRefreshKey(timestamp);
+      setHasRealData(true);
+      
+      if (onOptionsLoadedRef.current) {
+        onOptionsLoadedRef.current(putsWithBasicGreeks, searchSymbol.toUpperCase(), data.underlyingPrice || 0);
+      }
+      
+      console.log(`✅ Instance ${instanceId.current} - State updated with ${putsWithBasicGreeks.length} options`);
+      
     } catch (error) {
-      console.error('Error fetching options:', error);
-      generateSimulatedOptions(searchSymbol);
+      console.error(`❌ Instance ${instanceId.current} - Error fetching real-time options:`, error);
+      
+      // COMPLETELY DISABLE FALLBACK for now to prevent contamination
+      console.log(`🚫 Instance ${instanceId.current} - Fallback disabled to prevent data contamination`);
+      
+      // Just show error state instead
+      setOptions([]);
+      setUnderlyingPrice(0);
     }
+    
     setLoading(false);
-  };
+  }, [loading]); // Remove fetchFallbackOptions dependency
 
   useEffect(() => {
     if (symbol !== currentSymbol) {
       setCurrentSymbol(symbol);
       searchOptions(symbol);
     }
-  }, [symbol, currentSymbol]);
+  }, [symbol, currentSymbol, searchOptions]);
 
   useEffect(() => {
     if (options.length === 0) {
       searchOptions(symbol);
     }
-  }, []);
+  }, [options.length, searchOptions, symbol]);
+
+  // DEBUGGING: Log the actual options state
+  console.log(`🔍 DEBUG: Current options state:`, {
+    optionsLength: options.length,
+    firstOption: options[0],
+    sampleStrikes: options.slice(0, 5).map(o => o.strike),
+    sampleExpirations: [...new Set(options.slice(0, 10).map(o => o.expiration))],
+    underlyingPrice
+  });
+
+  // DEBUG: Check what's actually in the options array
+  console.log(`🔍 DETAILED OPTIONS ANALYSIS:`, {
+    totalOptions: options.length,
+    first10Strikes: options.slice(0, 10).map(o => o.strike),
+    uniqueStrikes: [...new Set(options.map(o => o.strike))].sort((a, b) => a - b),
+    strikeRange: {
+      min: Math.min(...options.map(o => o.strike)),
+      max: Math.max(...options.map(o => o.strike))
+    },
+    expirations: [...new Set(options.map(o => o.expiration))]
+  });
+
+  // ADD THIS: Show exact values
+  console.log(`🎯 EXACT VALUES:`, {
+    first10Strikes: options.slice(0, 10).map(o => o.strike),
+    allUniqueStrikes: [...new Set(options.map(o => o.strike))].sort((a, b) => a - b),
+    allExpirations: [...new Set(options.map(o => o.expiration))].sort()
+  });
 
   // Filter and sort options
   const filteredOptions = options.filter(option => {
@@ -190,199 +209,181 @@ export function OptionsSearch({ onSelectOption, onOptionsLoaded, symbol = 'SPY' 
     }
   });
 
+  // DEBUGGING: Log filtered results
+  console.log(`🔍 DEBUG: Filtered options:`, {
+    filteredLength: filteredOptions.length,
+    firstFiltered: filteredOptions[0],
+    selectedExpiration,
+    filterOTM
+  });
+
   // Get unique expirations for filter
   const expirations = [...new Set(options.map(o => o.expiration))].sort();
+
+  const formatCurrency = (value: number) => `$${value.toFixed(2)}`;
+  const formatPercent = (value: number) => `${(value * 100).toFixed(1)}%`;
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+  const formatGreek = (value: number) => value.toFixed(3);
+
+  const calculateDaysToExpiry = (expiration: string) => {
+    const expiryDate = new Date(expiration);
+    const today = new Date();
+    const diffTime = expiryDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(0, diffDays);
+  };
+
+  const getMoneyness = (strike: number, underlyingPrice: number) => {
+    if (strike < underlyingPrice * 0.95) return 'ITM';
+    if (strike > underlyingPrice * 1.05) return 'OTM';
+    return 'ATM';
+  };
+
+  console.log(`🖥️ Rendering with ${options.length} options. Sample option:`, options[0]);
+
+  // Add this debugging right before the table render:
+  console.log(`🎯 Instance ${instanceId.current} - About to render table with:`, {
+    filteredOptionsLength: filteredOptions.length,
+    firstStrike: filteredOptions[0]?.strike,
+    firstExpiration: filteredOptions[0]?.expiration,
+    tableKey: refreshKey
+  });
 
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin w-8 h-8 border-2 border-emerald-600 border-t-transparent rounded-full mx-auto mb-2"></div>
-          <div className="text-gray-600 dark:text-gray-400">Loading comprehensive options data...</div>
+          <p className="text-gray-600 dark:text-gray-400">Fetching real-time options data...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Filters and Controls */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div className="flex-1 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800">
+      {/* Header */}
+      <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex justify-between items-center mb-4">
           <div>
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Expiration
-            </label>
-            <select
-              value={selectedExpiration}
-              onChange={(e) => setSelectedExpiration(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            >
-              <option value="all">All Expirations ({expirations.length})</option>
-              {expirations.map(exp => {
-                const date = new Date(exp);
-                const days = Math.ceil((date.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                const label = days > 365 
-                  ? `${date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} (${(days/365).toFixed(1)}y)`
-                  : `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (${days}d)`;
-                
-                return (
-                  <option key={exp} value={exp}>
-                    {label}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Sort By
-            </label>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortOption)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            >
-              <option value="strike">Strike Price</option>
-              <option value="premium">Premium (High to Low)</option>
-              <option value="volume">Volume (High to Low)</option>
-              <option value="oi">Open Interest (High to Low)</option>
-            </select>
-          </div>
-          
-          <div className="flex items-end">
-            <label className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={filterOTM}
-                onChange={(e) => setFilterOTM(e.target.checked)}
-                className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-              />
-              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                Only OTM Puts
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+              {currentSymbol.toUpperCase()} Put Options (Instance: {instanceId.current})
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Current Price: <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                {formatCurrency(underlyingPrice)}
               </span>
-            </label>
+              {options.length > 0 && (
+                <span className="ml-4">
+                  {filteredOptions.length} contracts ({options.length} total)
+                </span>
+              )}
+            </p>
           </div>
+        </div>
+        
+        {/* Filters */}
+        <div className="flex flex-wrap gap-4">
+          <select
+            value={selectedExpiration}
+            onChange={(e) => setSelectedExpiration(e.target.value)}
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+          >
+            <option value="all">All Expirations</option>
+            {expirations.slice(0, 10).map(exp => (
+              <option key={exp} value={exp}>
+                {formatDate(exp)} ({calculateDaysToExpiry(exp)}d)
+              </option>
+            ))}
+          </select>
           
-          <div className="text-right">
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              Showing {filteredOptions.length} of {options.length} options
-            </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              Current Price: ${underlyingPrice}
-            </div>
-          </div>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortOption)}
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+          >
+            <option value="strike">Sort by Strike</option>
+            <option value="premium">Sort by Premium</option>
+            <option value="volume">Sort by Volume</option>
+            <option value="oi">Sort by Open Interest</option>
+          </select>
+          
+          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <input
+              type="checkbox"
+              checked={filterOTM}
+              onChange={(e) => setFilterOTM(e.target.checked)}
+              className="rounded"
+            />
+            Hide Deep OTM
+          </label>
+          
+          <button
+            onClick={() => {
+              console.log('🔄 Manual refresh triggered');
+              setOptions([]);
+              setRefreshKey(prev => prev + 1); // Also increment refresh key
+              searchOptions(currentSymbol);
+            }}
+            className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm"
+          >
+            Refresh Data
+          </button>
+          
+          <button
+            onClick={() => {
+              console.log('🗑️ Clearing all caches...');
+              // Clear all browser caches
+              if ('caches' in window) {
+                caches.keys().then(names => {
+                  names.forEach(name => caches.delete(name));
+                });
+              }
+              // Clear local storage options-related data
+              Object.keys(localStorage).forEach(key => {
+                if (key.includes('option') || key.includes('quote')) {
+                  localStorage.removeItem(key);
+                }
+              });
+              // Force reload
+              window.location.reload();
+            }}
+            className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+          >
+            Clear Cache & Reload
+          </button>
         </div>
       </div>
 
-      {filteredOptions.length > 0 ? (
-        <div className="flex-1 overflow-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
-              <tr>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Strike</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Bid/Ask</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">IV / Greeks</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Volume / OI</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Expiration</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Analysis</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {filteredOptions.map((option, ) => {
-                const isOTM = option.strike < underlyingPrice * 0.95;
-                const daysToExpiry = Math.ceil((new Date(option.expiration).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                const successRate = (1 - Math.abs(option.delta)) * 100;
-                const annualizedReturn = (option.bid / option.strike) * (365 / daysToExpiry) * 100;
-                
-                return (
-                  <tr key={`${option.symbol}-${option.strike}-${option.expiration}`} 
-                      className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors group">
-                    <td className="p-3">
-                      <div className="flex items-center space-x-2">
-                        <div>
-                          <div className="font-bold text-gray-900 dark:text-white">
-                            ${option.strike}
-                          </div>
-                          <div className={`text-xs font-medium px-2 py-1 rounded-full ${
-                            isOTM 
-                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' 
-                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
-                          }`}>
-                            {isOTM ? 'OTM' : 'ITM'}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <div className="font-bold text-emerald-600 dark:text-emerald-400">
-                        ${option.bid.toFixed(2)}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Ask: ${option.ask.toFixed(2)}
-                      </div>
-                      <div className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                        ${(option.bid * 100).toFixed(0)} total
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">
-                        {(option.impliedVolatility * 100).toFixed(1)}% IV
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Δ: {option.delta.toFixed(3)}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Θ: {option.theta.toFixed(3)}
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">
-                        Vol: {option.volume.toLocaleString()}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        OI: {option.openInterest.toLocaleString()}
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <div className="font-medium text-gray-900 dark:text-white">
-                        {daysToExpiry}d
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {new Date(option.expiration).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">
-                        {successRate.toFixed(0)}% Win
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {annualizedReturn.toFixed(1)}% Ann.
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <button
-                        onClick={() => onSelectOption(option)}
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded transition-all transform group-hover:scale-105 text-xs"
-                      >
-                        Analyze
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {/* TEMP: Replace the entire table with debug output */}
+      <div className="p-4 space-y-2 max-h-96 overflow-y-auto">
+        <div className="text-sm font-mono">
+          <div>Instance: {instanceId.current}</div>
+          <div>Options in state: {options.length}</div>
+          <div>Filtered options: {filteredOptions.length}</div>
+          <div>Refresh key: {refreshKey}</div>
         </div>
-      ) : (
-        <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
-          <div className="text-center">
-            <div className="text-4xl mb-4">📊</div>
-            <div className="text-lg font-medium">No options match your filters</div>
-            <div className="text-sm mt-1">Try adjusting the expiration or OTM filter</div>
+        
+        {filteredOptions.slice(0, 10).map((option, index) => (
+          <div 
+            key={`debug-${refreshKey}-${index}`}
+            className="p-2 border border-gray-300 text-sm"
+          >
+            <div>Strike: ${option.strike}</div>
+            <div>Exp: {option.expiration}</div>
+            <div>Bid: ${option.bid} | Ask: ${option.ask}</div>
+            <div>Delta: {option.delta?.toFixed(3)} | Theta: {option.theta?.toFixed(3)}</div>
+            <div>Symbol: {option.symbol}</div>
           </div>
+        ))}
+      </div>
+      
+      {filteredOptions.length === 0 && (
+        <div className="p-8 text-center">
+          <p className="text-gray-500 dark:text-gray-400">No options found matching your criteria.</p>
         </div>
       )}
     </div>

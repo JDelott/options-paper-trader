@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { OptionsSearch } from './components/OptionsSearch';
 import { Portfolio } from './components/Portfolio';
 import { TradeModal } from './components/TradeModal';
 import { AIAnalysis } from './components/AIAnalysis';
@@ -11,7 +10,16 @@ import { OptionsScanner } from './components/OptionsScanner';
 import { IVRankChart } from './components/IVRankChart';
 import { RiskProfiler } from './components/RiskProfiler';
 import { OpportunitiesDashboard } from './components/OpportunitiesDashboard';
+import dynamic from 'next/dynamic';
 
+const OptionsSearch = dynamic(() => import('./components/OptionsSearch').then(mod => ({ default: mod.OptionsSearch })), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center p-8">
+      <div className="animate-spin w-8 h-8 border-2 border-emerald-600 border-t-transparent rounded-full"></div>
+    </div>
+  )
+});
 
 export default function Home() {
   const [selectedOption, setSelectedOption] = useState<PutOption | null>(null);
