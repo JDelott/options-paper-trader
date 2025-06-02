@@ -44,13 +44,6 @@ function getCache(key: string): (OptionsApiResponse | ErrorCacheData) | null {
   return entry.data;
 }
 
-// Tradier API types
-// interface TradierOption {
-//   root_symbol: string;
-//   expiration_type: string;
-//   // ... other fields
-// }
-
 // Add interface for individual option contract
 interface TradierOptionContract {
   symbol: string;
@@ -138,22 +131,8 @@ interface TradierQuoteResponse {
   };
 }
 
-// Add interface for Tradier expirations response
-interface TradierExpirationsResponse {
-  expirations: {
-    expiration: Array<{
-      date: string;
-      contract_size?: number;
-      expiration_type?: string;
-      strikes?: {
-        strike: number[];
-      };
-    }>;
-  };
-}
-
-const TRADIER_API_BASE = 'https://sandbox.tradier.com/v1';  // Use sandbox endpoint
-const TRADIER_ACCESS_TOKEN = 'GJejQh6ftSXPqRmjYjjkyTmAvQ4A';
+const TRADIER_API_BASE = process.env.TRADIER_API_BASE || 'https://api.tradier.com/v1';
+const TRADIER_ACCESS_TOKEN = process.env.TRADIER_API_KEY;
 
 export async function getTradierData(symbol: string): Promise<OptionsApiResponse> {
   const cacheKey = getCacheKey('tradier', symbol);
@@ -165,10 +144,10 @@ export async function getTradierData(symbol: string): Promise<OptionsApiResponse
     return { ...cached, fromCache: true };
   }
 
-  console.log(`🌐 Cache MISS - Fetching ${symbol} from Tradier Sandbox...`);
+  console.log(`🌐 Cache MISS - Fetching ${symbol} from Tradier Production...`);
 
   try {
-    // Get real-time quote (will be 15-min delayed in sandbox)
+    // Get real-time quote
     const quoteResponse = await fetch(
       `${TRADIER_API_BASE}/markets/quotes?symbols=${symbol}`,
       {
@@ -189,9 +168,10 @@ export async function getTradierData(symbol: string): Promise<OptionsApiResponse
     const quote = quoteData.quotes.quote;
     const stockPrice = quote.last;
 
-    console.log(`${symbol} delayed price (15-min): $${stockPrice}`);
+    console.log(`${symbol} real-time price: $${stockPrice}`);
 
-    // First, get all available expiration dates
+    // Get available expiration dates (this returns JSON)
+    console.log('🔍 Fetching expirations...');
     const expirationsResponse = await fetch(
       `${TRADIER_API_BASE}/markets/options/expirations?symbol=${symbol}&includeAllRoots=true`,
       {
@@ -202,24 +182,51 @@ export async function getTradierData(symbol: string): Promise<OptionsApiResponse
       }
     );
 
+    console.log('Expirations response status:', expirationsResponse.status);
+    console.log('Expirations response headers:', Object.fromEntries(expirationsResponse.headers.entries()));
+
     if (!expirationsResponse.ok) {
       throw new Error(`Tradier expirations API error: ${expirationsResponse.status}`);
     }
 
-    const expirationsData: TradierExpirationsResponse = await expirationsResponse.json();
-    
-    if (!expirationsData.expirations || !Array.isArray(expirationsData.expirations.expiration)) {
-      console.log('No expiration dates available for', symbol);
+    const expirationsText = await expirationsResponse.text();
+
+    // Parse JSON response (not XML!)
+    let expirationDates: string[] = [];
+
+    try {
+      const expirationsData = JSON.parse(expirationsText);
+      console.log('✅ Parsed JSON response:', expirationsData);
+      
+      if (expirationsData.expirations && expirationsData.expirations.date) {
+        if (Array.isArray(expirationsData.expirations.date)) {
+          expirationDates = expirationsData.expirations.date;
+        } else {
+          // Single date case
+          expirationDates = [expirationsData.expirations.date];
+        }
+      }
+    } catch (parseError) {
+      console.error('❌ Failed to parse JSON response:', parseError);
+      console.log('Raw response:', expirationsText);
+      throw new Error('Failed to parse expirations response');
+    }
+
+    console.log('📅 Extracted expiration dates:', expirationDates);
+    console.log('📊 Number of dates found:', expirationDates.length);
+
+    if (expirationDates.length === 0) {
+      console.log('❌ No expiration dates found for', symbol);
       throw new Error('No expiration dates available');
     }
 
-    const availableExpirations = expirationsData.expirations.expiration
-      .map(exp => exp.date)
+    const availableExpirations = expirationDates
       .sort()
-      .slice(0, 12); // Limit to first 12 expirations to avoid rate limiting
+      .slice(0, 12); // Limit to first 12 expirations
 
-    console.log(`Found ${availableExpirations.length} expiration dates:`, availableExpirations);
-    // Fetch options chains for each expiration (in parallel, but with a small delay)
+    console.log(`✅ Found ${availableExpirations.length} expiration dates:`, availableExpirations);
+    
+    // Fetch options chains for each expiration
     const allPuts: {
       symbol: string;
       strike: number;
@@ -269,12 +276,12 @@ export async function getTradierData(symbol: string): Promise<OptionsApiResponse
               symbol: put.symbol,
               strike: put.strike,
               expiration: put.expiration_date,
-              bid: put.bid || 0,
-              ask: put.ask || 0,
-              impliedVolatility: 0, // Tradier doesn't provide IV directly
+              bid: put.bid ?? 0,
+              ask: put.ask ?? 0,
+              impliedVolatility: 0,
               openInterest: put.open_interest || 0,
               volume: put.volume || 0,
-              delta: 0, // Tradier doesn't provide Greeks
+              delta: 0,
               gamma: 0,
               theta: 0,
               underlyingPrice: stockPrice
@@ -283,8 +290,8 @@ export async function getTradierData(symbol: string): Promise<OptionsApiResponse
           allPuts.push(...puts);
           console.log(`Added ${puts.length} puts from ${expiration}`);
         }
-      } catch (error) {
-        console.warn(`Error fetching options for ${expiration}:`, error);
+      } catch (optionsError) {
+        console.warn(`Error fetching options for ${expiration}:`, optionsError);
         continue;
       }
     }
@@ -299,7 +306,7 @@ export async function getTradierData(symbol: string): Promise<OptionsApiResponse
       success: true,
       puts: allPuts,
       underlyingPrice: stockPrice,
-      source: `Tradier Sandbox (${availableExpirations.length} expirations, 15-min Delayed)`,
+      source: `Tradier Production (${availableExpirations.length} expirations, Real-time)`,
       timestamp: new Date().toISOString(),
       fromCache: false
     };
@@ -338,7 +345,7 @@ export async function GET(request: NextRequest) {
       cacheInfo: {
         fromCache: data.fromCache || false,
         cacheDuration: data.fromCache ? CACHE_DURATIONS.OPTIONS_DATA : null,
-        provider: 'Tradier'
+        provider: 'Tradier Production'
       }
     };
     

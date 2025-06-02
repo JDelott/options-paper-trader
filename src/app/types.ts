@@ -47,3 +47,92 @@ export interface OptionsChain {
   puts: PutOption[];
   lastUpdated: string;
 }
+
+export interface Order {
+  id: string;
+  symbol: string;
+  type: 'put' | 'call' | 'stock';
+  side: 'buy' | 'sell';
+  quantity: number;
+  orderType: 'market' | 'limit' | 'stop';
+  limitPrice?: number;
+  stopPrice?: number;
+  status: 'pending' | 'filled' | 'cancelled' | 'rejected' | 'partial';
+  submittedAt: string;
+  filledAt?: string;
+  fillPrice?: number;
+  slippage?: number;
+  strike?: number;
+  expiration?: string;
+  estimatedValue: number;
+  actualValue?: number;
+  cancelledAt?: string;
+  lastModified?: string;
+}
+
+export interface Position {
+  symbol: string;
+  type: 'put' | 'call' | 'stock';
+  side: 'long' | 'short';
+  quantity: number;
+  avgCost: number;
+  currentPrice: number;
+  marketValue: number;
+  unrealizedPnl: number;
+  realizedPnl: number;
+  dayChange: number;
+  dayChangePercent: number;
+  strike?: number;
+  expiration?: string;
+  lastUpdated: string;
+}
+
+export interface Portfolio {
+  id: string;
+  userId: string;
+  cash: number;
+  totalValue: number;
+  dayChange: number;
+  dayChangePercent: number;
+  buyingPower: number;
+  positions: Position[];
+  orders: Order[];
+  trades: Trade[];
+  performance: {
+    totalReturn: number;
+    totalReturnPercent: number;
+    winRate: number;
+    profitFactor: number;
+    sharpeRatio: number;
+    maxDrawdown: number;
+  };
+  lastUpdated: string;
+}
+
+export interface TradierOption {
+  symbol: string;
+  description: string;
+  type: string;
+  last: number | null;
+  bid: number | null;
+  ask: number | null;
+  strike: number;
+  volume: number;
+  open_interest: number;
+  expiration_date: string;
+  option_type: 'put' | 'call';
+  underlying: string;
+}
+
+export interface PerformanceMetrics {
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  totalPnL: number;
+  avgWin: number;
+  avgLoss: number;
+  profitFactor: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+}
