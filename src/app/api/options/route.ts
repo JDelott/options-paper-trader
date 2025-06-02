@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getTradierData } from '../tradier/route';
 
 interface PutOption {
   symbol: string;
@@ -107,31 +108,6 @@ interface AlphaVantageResponse {
   'Global Quote': AlphaVantageQuote;
 }
 
-interface PolygonTradeResult {
-  p: number;
-  s: number;
-  t: number;
-}
-
-interface PolygonTradeResponse {
-  results: PolygonTradeResult;
-  status: string;
-}
-
-interface PolygonContract {
-  contract_type: 'put' | 'call';
-  expiration_date: string;
-  strike_price: number;
-  ticker: string;
-  underlying_ticker: string;
-}
-
-interface PolygonContractsResponse {
-  results: PolygonContract[];
-  status: string;
-  count: number;
-}
-
 async function getAlphaVantageData(symbol: string): Promise<OptionsApiResponse> {
   const cacheKey = getCacheKey('alphavantage', symbol);
   
@@ -190,107 +166,6 @@ async function getAlphaVantageData(symbol: string): Promise<OptionsApiResponse> 
 
   } catch (error) {
     console.error('Alpha Vantage API Error:', error);
-    
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    
-    // Cache errors briefly to avoid rapid retries
-    const errorCache: ErrorCacheData = { error: errorMessage };
-    setCache(cacheKey, errorCache, CACHE_DURATIONS.ERROR_CACHE);
-    throw new Error(errorMessage);
-  }
-}
-
-async function getPolygonData(symbol: string): Promise<OptionsApiResponse> {
-  const cacheKey = getCacheKey('polygon', symbol);
-  
-  // Check cache first
-  const cached = getCache(cacheKey);
-  if (cached && 'puts' in cached) { // Type guard to ensure it's OptionsApiResponse
-    console.log(`📦 Cache HIT for Polygon ${symbol}`);
-    return { ...cached, fromCache: true };
-  }
-
-  console.log(`🌐 Cache MISS - Fetching ${symbol} from Polygon...`);
-
-  const apiKey = process.env.POLYGON_API_KEY;
-  if (!apiKey) {
-    throw new Error('POLYGON_API_KEY not configured');
-  }
-
-  try {
-    const priceResponse = await fetch(
-      `https://api.polygon.io/v2/last/trade/${symbol}?apikey=${apiKey}`
-    );
-    
-    if (!priceResponse.ok) {
-      throw new Error(`Polygon price API error: ${priceResponse.status}`);
-    }
-    
-    const priceData: PolygonTradeResponse = await priceResponse.json();
-    const stockPrice = priceData.results?.p;
-    
-    if (!stockPrice || isNaN(stockPrice)) {
-      throw new Error(`No valid price data for ${symbol} from Polygon`);
-    }
-
-    console.log(`${symbol} real stock price: $${stockPrice}`);
-
-    // Try to get real options contracts
-    const contractsResponse = await fetch(
-      `https://api.polygon.io/v3/reference/options/contracts?underlying_ticker=${symbol}&contract_type=put&limit=50&apikey=${apiKey}`
-    );
-    
-    let puts: PutOption[];
-    let source = 'Polygon (Real Stock Price)';
-
-    if (contractsResponse.ok) {
-      const contractsData: PolygonContractsResponse = await contractsResponse.json();
-      const contracts = contractsData.results || [];
-
-      if (contracts.length > 0) {
-        puts = contracts
-          .filter((contract: PolygonContract) => contract.contract_type === 'put')
-          .slice(0, 30)
-          .map((contract: PolygonContract) => ({
-            symbol: symbol,
-            strike: contract.strike_price,
-            expiration: contract.expiration_date,
-            bid: 0,
-            ask: 0,
-            impliedVolatility: 0.2,
-            openInterest: 0,
-            volume: 0,
-            delta: -0.3,
-            gamma: 0.01,
-            theta: -0.02,
-            underlyingPrice: stockPrice
-          }))
-          .sort((a, b) => a.strike - b.strike);
-        
-        source = 'Polygon (Real Options Structure)';
-      } else {
-        puts = await generateOptionsFromRealPrice(symbol, stockPrice);
-      }
-    } else {
-      puts = await generateOptionsFromRealPrice(symbol, stockPrice);
-    }
-
-    const result: OptionsApiResponse = {
-      success: true,
-      puts,
-      underlyingPrice: stockPrice,
-      source,
-      timestamp: new Date().toISOString(),
-      fromCache: false
-    };
-
-    // Cache the successful result
-    setCache(cacheKey, result, CACHE_DURATIONS.OPTIONS_DATA);
-    
-    return result;
-
-  } catch (error) {
-    console.error('Polygon API Error:', error);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     
@@ -382,65 +257,40 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const providers = [
-    { 
-      name: 'Polygon', 
-      fn: () => getPolygonData(symbol), 
-      enabled: !!process.env.POLYGON_API_KEY 
-    },
-    { 
-      name: 'Alpha Vantage', 
-      fn: () => getAlphaVantageData(symbol), 
-      enabled: !!process.env.ALPHA_VANTAGE_API_KEY 
-    }
-  ];
-
-  for (const provider of providers) {
-    if (!provider.enabled) {
-      console.log(`${provider.name} API key not configured, skipping...`);
-      continue;
-    }
+  try {
+    const data = await getTradierData(symbol);
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error('Tradier API error:', error);
     
+    // Fallback to Alpha Vantage if Tradier fails
     try {
-      const data = await provider.fn();
-      
-      // Add cache info to response
-      const response = {
-        ...data,
-        cacheInfo: {
-          fromCache: data.fromCache || false,
-          cacheDuration: data.fromCache ? CACHE_DURATIONS.OPTIONS_DATA : null,
-          provider: provider.name
-        }
-      };
-      
-      return NextResponse.json(response);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      console.error(`❌ ${provider.name} failed for ${symbol}:`, errorMessage);
-      continue;
+      const fallbackData = await getAlphaVantageData(symbol);
+      return NextResponse.json({
+        ...fallbackData,
+        source: 'Alpha Vantage (Fallback)',
+        warning: 'Using fallback data provider'
+      });
+    } catch (fallbackError) {
+      console.error('Fallback API error:', fallbackError);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Failed to get market data from all providers'
+        }, 
+        { status: 500 }
+      );
     }
   }
-
-  return NextResponse.json(
-    { 
-      success: false, 
-      error: 'Failed to get real market data. Check API keys:\n' +
-             `• POLYGON_API_KEY: ${process.env.POLYGON_API_KEY ? 'configured' : 'missing'}\n` +
-             `• ALPHA_VANTAGE_API_KEY: ${process.env.ALPHA_VANTAGE_API_KEY ? 'configured' : 'missing'}`
-    }, 
-    { status: 500 }
-  );
 }
 
-// Optional: Add cache status endpoint for debugging
+// Modify the DELETE handler to only clear Alpha Vantage cache
 export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const symbol = searchParams.get('symbol')?.toUpperCase();
   
   if (symbol) {
     // Clear specific symbol cache
-    cache.delete(getCacheKey('polygon', symbol));
     cache.delete(getCacheKey('alphavantage', symbol));
     return NextResponse.json({ message: `Cache cleared for ${symbol}` });
   } else {

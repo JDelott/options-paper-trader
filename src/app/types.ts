@@ -13,6 +13,19 @@ export interface PutOption {
   underlyingPrice: number;
 }
 
+export interface OptionsApiResponse {
+  success: boolean;
+  puts: PutOption[];
+  underlyingPrice: number;
+  source: string;
+  timestamp: string;
+  fromCache: boolean;
+}
+
+export interface ErrorCacheData {
+  error: string;
+}
+
 export interface Trade {
   id: string;
   symbol: string;
