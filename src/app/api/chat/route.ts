@@ -1,121 +1,151 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
-import { PutOption } from '../../types';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+import { PutOption, OptionsAnalysisResult,  } from '../../types';
 
 interface ChatMessage {
+  id: string;
   role: 'user' | 'assistant';
   content: string;
-  timestamp: string;
+  timestamp: Date;
 }
 
-interface PortfolioDetails {
+interface Portfolio {
   cash: number;
-  activePositions: number;
+  totalValue: number;
   unrealizedPnL: number;
 }
 
-interface ChatContext {
-  type: 'option' | 'portfolio';
-  symbol?: string;
-  optionDetails?: PutOption;
-  portfolioDetails?: PortfolioDetails;
-  originalAnalysis?: string;
-}
-
 interface ChatRequest {
-  messages: ChatMessage[];
-  context: ChatContext;
-  newMessage: string;
+  message: string;
+  context?: string;
+  chatHistory?: ChatMessage[];
+  step?: number;
+  symbol?: string;
+  price?: number;
+  selectedOption?: PutOption;
+  selectedOptions?: OptionsAnalysisResult[];
+  portfolio?: Portfolio;
+  // Existing AI Analysis props
+  options?: PutOption[];
+  underlyingPrice?: number;
+  chatType?: 'global' | 'analysis'; // New field to distinguish
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages, context, newMessage }: ChatRequest = await request.json();
+    const body: ChatRequest = await request.json();
+    const { 
+      message, 
+      context, 
+      chatHistory, 
+      step, 
+      symbol, 
+      price, 
+      selectedOption, 
+      selectedOptions, 
+      portfolio,
+      options,
+      underlyingPrice,
+      chatType = 'analysis' // Default to existing behavior
+    } = body;
 
-    // Build the conversation history for Claude
-    const conversationMessages = [
-      {
-        role: "user" as const,
-        content: buildContextPrompt(context)
+    let systemPrompt = '';
+
+    if (chatType === 'global') {
+      // Global chat system prompt - use the context variables
+      const currentStep = step || 1;
+      const currentSymbol = symbol || 'Unknown';
+      const currentPrice = price || underlyingPrice || 0;
+      const hasSelectedOption = selectedOption !== undefined;
+      const selectedOptionsCount = selectedOptions?.length || 0;
+      const portfolioInfo = portfolio ? `Cash: $${portfolio.cash}, P&L: $${portfolio.unrealizedPnL}` : 'No portfolio data';
+
+      systemPrompt = `You are an expert options trading AI assistant for a paper trading app. You help users learn put-selling strategies, analyze options, and understand risk management.
+
+Current Context: ${context || `Step ${currentStep}, Symbol: ${currentSymbol}, Price: $${currentPrice}`}
+
+Current State:
+- Step: ${currentStep}
+- Symbol: ${currentSymbol} (${currentPrice > 0 ? `$${currentPrice}` : 'price loading'})
+- Selected Option: ${hasSelectedOption ? `$${selectedOption?.strike} put` : 'none'}
+- Options for Comparison: ${selectedOptionsCount}
+- Portfolio: ${portfolioInfo}
+
+Key Capabilities:
+- Explain options strategies and Greeks
+- Analyze risk/reward scenarios
+- Calculate annualized returns: (premium / (strike - premium)) * (365 / daysToExpiration)
+- Provide step-by-step guidance
+- Review portfolio performance
+- Educational risk management advice
+
+Guidelines:
+- Always emphasize this is paper trading for education
+- Be specific with calculations when analyzing options
+- Use emojis sparingly but effectively
+- Keep responses concise but informative
+- Focus on practical, actionable advice
+- Explain the "why" behind recommendations
+
+Chat History: ${JSON.stringify(chatHistory?.slice(-3) || [])}`;
+    } else {
+      // Existing AI Analysis system prompt
+      const analysisSymbol = symbol || 'Unknown';
+      const analysisPrice = underlyingPrice || price || 0;
+      const optionsCount = options?.length || 0;
+
+      systemPrompt = `You are an expert options trading AI assistant. Analyze the provided options data and give specific trading advice for put-selling strategies.
+
+Focus on:
+- Risk assessment and probability of profit
+- Annualized return calculations
+- Time decay and expiration considerations
+- Strike price selection relative to current price
+- Market conditions and volatility
+
+Current symbol: ${analysisSymbol}
+Current price: $${analysisPrice}
+Available options: ${optionsCount}
+
+Provide specific, actionable advice with calculations where relevant.`;
+    }
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+        'anthropic-version': '2023-06-01'
       },
-      ...messages.map(msg => ({
-        role: msg.role as "user" | "assistant",
-        content: msg.content
-      })),
-      {
-        role: "user" as const,
-        content: newMessage
-      }
-    ];
-
-    const systemPrompt = `You are an expert options trading analyst continuing a conversation about options analysis. 
-
-Key guidelines:
-- This is for educational/paper trading purposes only
-- Focus on put-selling strategies and premium collection
-- Be conversational but informative
-- Reference previous parts of the conversation when relevant
-- Always include appropriate risk warnings
-- Keep responses concise but helpful
-- If asked about specific trades, provide educational analysis not financial advice`;
-
-    const message = await anthropic.messages.create({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 800,
-      temperature: 0.7,
-      system: systemPrompt,
-      messages: conversationMessages
+      body: JSON.stringify({
+        model: 'claude-3-sonnet-20240229',
+        max_tokens: 1000,
+        temperature: 0.7,
+        messages: [
+          {
+            role: 'user',
+            content: `${systemPrompt}\n\nUser Question: ${message}`
+          }
+        ]
+      })
     });
 
-    const response = message.content[0].type === 'text' ? message.content[0].text : '';
+    if (!response.ok) {
+      throw new Error(`API call failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const assistantResponse = data.content[0].text;
 
     return NextResponse.json({
       success: true,
-      response,
-      timestamp: new Date().toISOString()
+      response: assistantResponse
     });
 
   } catch (error) {
     console.error('Chat API error:', error);
-    return NextResponse.json(
-      { error: 'Failed to process chat message' },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: false,
+      error: 'Failed to process chat message'
+    }, { status: 500 });
   }
-}
-
-function buildContextPrompt(context: ChatContext): string {
-  let prompt = `You are having a conversation about options trading analysis. Here's the context:\n\n`;
-  
-  if (context.type === 'option' && context.optionDetails) {
-    const option = context.optionDetails;
-    prompt += `**Current Option Being Discussed:**
-- Symbol: ${option.symbol}
-- Strike: $${option.strike}
-- Expiration: ${option.expiration}
-- Premium: $${option.bid}
-- Current Stock Price: $${option.underlyingPrice}
-- Implied Volatility: ${(option.impliedVolatility * 100).toFixed(1)}%\n\n`;
-  }
-  
-  if (context.type === 'portfolio' && context.portfolioDetails) {
-    const portfolio = context.portfolioDetails;
-    prompt += `**Current Portfolio Being Discussed:**
-- Cash Available: $${portfolio.cash.toLocaleString()}
-- Active Positions: ${portfolio.activePositions}
-- Unrealized P&L: $${portfolio.unrealizedPnL.toLocaleString()}\n\n`;
-  }
-
-  if (context.originalAnalysis) {
-    prompt += `**Original Analysis:**
-${context.originalAnalysis}\n\n`;
-  }
-
-  prompt += `The user will now ask follow-up questions about this analysis. Please provide helpful, educational responses focused on options trading education.`;
-  
-  return prompt;
 }

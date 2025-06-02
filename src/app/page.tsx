@@ -12,6 +12,7 @@ import dynamic from 'next/dynamic';
 import { OptionsAnalysis } from './components/OptionsAnalysis';
 import { OptionsAnalysisResult } from './types';
 import { AdvancedOptionsComparison } from './components/AdvancedOptionsComparison';
+import { GlobalChat } from './components/GlobalChat';
 
 const OptionsSearch = dynamic(() => import('./components/OptionsSearch').then(mod => ({ default: mod.OptionsSearch })), {
   ssr: false,
@@ -910,6 +911,18 @@ export default function Home() {
           onSelectOption={handleSelectOption}
         />
       )}
+
+      {/* Global Chat Integration */}
+      <GlobalChat
+        currentStep={currentStep}
+        currentSymbol={currentSymbol}
+        currentPrice={currentPrice}
+        selectedOption={selectedOption}
+        selectedOptions={selectedOptions}
+        trades={trades}
+        currentOptions={currentOptions}
+        portfolio={portfolio}
+      />
     </div>
   );
 }
